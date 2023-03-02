@@ -1,0 +1,31 @@
+{
+  "name": "cardano-buoy",
+  "version": "1.0.0",
+  "description": "A set of useful utils for building Cardano dApps",
+  "main": "dist/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc && tsc-alias",
+    "prepare": "npm run build"
+  },
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@cardano-ogmios/client": "^5.6.0",
+    "@emurgo/cardano-serialization-lib-browser": "github:Karakatiza666/cardano-serialization-lib-browser",
+    "@emurgo/cip14-js": "^3.0.1",
+    "@stricahq/typhonjs": "^1.2.8",
+    "cheerio": "^1.0.0-rc.12",
+    "deepmerge-ts": "^4.3.0",
+    "fp-ts": "^2.13.1",
+    "graphql-request": "^5.2.0",
+    "lockr": "^0.9.0-beta.0",
+    "ts-practical-fp": "github:Karakatiza666/ts-practical-fp",
+    "typescript": "^4.9.5",
+    "vlq": "^2.0.4"
+  },
+  "devDependencies": {
+    "tsc-alias": "^1.8.2"
+  }
+}

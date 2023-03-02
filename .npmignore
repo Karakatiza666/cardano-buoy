@@ -1,0 +1,2 @@
+# Empty .npmignore required for prepare script to run on install
+# See https://stackoverflow.com/questions/48287776/automatically-build-npm-module-on-install-from-github

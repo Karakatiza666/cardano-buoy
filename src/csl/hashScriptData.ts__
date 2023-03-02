@@ -1,0 +1,74 @@
+import type { Costmdls, PlutusList, Redeemers } from "@emurgo/cardano-serialization-lib-browser"
+import type { EncodedPlutusScript, EncodedWitnesses } from "@stricahq/typhonjs/dist/internal-types";
+import { WitnessType, type LanguageView } from "@stricahq/typhonjs/dist/types.js";
+import { encodeLanguageViews, encodeWitnesses } from "@stricahq/typhonjs/dist/utils/encoder"
+import * as cbors from '@stricahq/cbors'
+import { hash32 } from "@stricahq/typhonjs/dist/utils/crypto";
+
+const generateScriptDataHash = (witnesses: EncodedWitnesses, languageView: LanguageView) => {
+   const encodedPlutusDataList = witnesses.get(WitnessType.PLUTUS_DATA);
+   const encodedRedeemers = witnesses.get(WitnessType.REDEEMER);
+   if (encodedPlutusDataList || encodedRedeemers) {
+       const encodedPlutusScripts = witnesses.get(WitnessType.PLUTUS_SCRIPT);
+       const langViewCbor = encodeLanguageViews(languageView, encodedPlutusScripts);
+       const plutusDataCbor = (encodedPlutusDataList === null || encodedPlutusDataList === void 0 ? void 0 : encodedPlutusDataList.length)
+           ? cbors.Encoder.encode(encodedPlutusDataList).toString("hex")
+           : "";
+       const redeemerCbor = encodedRedeemers
+           ? cbors.Encoder.encode(encodedRedeemers).toString("hex")
+           : cbors.Encoder.encode([]).toString("hex");
+       const scriptData = Buffer.from(redeemerCbor + plutusDataCbor + langViewCbor, "hex");
+       return hash32(scriptData);
+   }
+   return undefined;
+};
+
+const cslTyphonScriptData = (redeemers: Redeemers, cost_models: Costmdls, datums?: PlutusList | undefined) => {
+   cost_models.get(LCSL.Language.new_plutus_v2())
+   generateScriptDataHash(encodeWitnesses(), )
+}
+
+// const encodeLanguageViews = (languageView: LanguageView, encodedPlutusScripts?: Array<EncodedPlutusScript>) => {
+//    const encodedLanguageView = new Map();
+//    if (encodedPlutusScripts && encodedPlutusScripts.length > 0) {
+//        // The encoding is Plutus V1 Specific
+//        const compareString = (a: string, b: string) => {
+//          if (a < b)
+//            return -1;
+//          if (a > b)
+//            return 1;
+//          return 0;
+//        }
+//        const costMdls = Object.entries(languageView.PlutusScriptV1)
+//          .sort((a, b) => compareString(a[0], b[0]))
+//          .map((item) => item[1])
+//        const indefCostMdls = cbors.IndefiniteArray.from(costMdls);
+//        const cborCostMdls = cbors.Encoder.encode(indefCostMdls);
+//        const langId = cbors.Encoder.encode(0);
+//        // Plutus V1
+//        encodedLanguageView.set(langId, cborCostMdls);
+//    }
+//    return cbors.Encoder.encode(encodedLanguageView).toString("hex");
+// };
+const encodeRawLanguageViews = (languageView: number[], encodedPlutusScripts?: Array<EncodedPlutusScript>) => {
+   const encodedLanguageView = new Map();
+   if (encodedPlutusScripts && encodedPlutusScripts.length > 0) {
+       // The encoding is Plutus V1 Specific
+       const compareString = (a: string, b: string) => {
+         if (a < b)
+           return -1;
+         if (a > b)
+           return 1;
+         return 0;
+       }
+       const costMdls = Object.entries(languageView.PlutusScriptV1)
+         .sort((a, b) => compareString(a[0], b[0]))
+         .map((item) => item[1])
+       const indefCostMdls = cbors.IndefiniteArray.from(costMdls);
+       const cborCostMdls = cbors.Encoder.encode(indefCostMdls);
+       const langId = cbors.Encoder.encode(0);
+       // Plutus V1
+       encodedLanguageView.set(langId, cborCostMdls);
+   }
+   return cbors.Encoder.encode(encodedLanguageView).toString("hex");
+};
