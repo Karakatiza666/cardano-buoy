@@ -845,6 +845,7 @@ export const dummySignTx = async (costmdls: Costmdls, txBuilder: BuilderResult,
 }
 
 // Find UTxO from iterator matching target TransactionInput
+// TODO: refactor using generic iteratorLookup
 const requireInputUTxO = (pagination: () => () => Promise<TransactionUnspentOutput | null>) => async (target: TransactionInput) => {
    const iterator = pagination()
    let utxo : TransactionUnspentOutput | null = null

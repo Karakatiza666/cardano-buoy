@@ -16,11 +16,12 @@
     "@emurgo/cardano-serialization-lib-browser": "github:Karakatiza666/cardano-serialization-lib-browser",
     "@emurgo/cip14-js": "^3.0.1",
     "@stricahq/typhonjs": "^1.2.8",
+    "@types/lockr": "^0.8.8",
     "cheerio": "^1.0.0-rc.12",
     "deepmerge-ts": "^4.3.0",
     "fp-ts": "^2.13.1",
     "graphql-request": "^5.2.0",
-    "lockr": "^0.9.0-beta.0",
+    "lockr": "^0.9.0-beta.2",
     "ts-practical-fp": "github:Karakatiza666/ts-practical-fp",
     "typescript": "^4.9.5",
     "vlq": "^2.0.4"

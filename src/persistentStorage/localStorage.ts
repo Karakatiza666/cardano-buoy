@@ -8,12 +8,12 @@ export default {
          keys = [keys]
       }
       const result: Record<string, T> = {}
-      keys.forEach(key => result[key] = Lockr.get(key) as T)
+      keys.forEach(key => result[key] = Lockr.get<T>(key))
       return result
    },
    set: <T = StoragePrimitive>(items: Record<string, T>) =>
       Object.entries(items).forEach(([key, val]) =>
-         Lockr.set(key, val)
+         Lockr.set(key, val as string | number | Object)
       ),
    remove: async (keys: string | string[]) => {
       if (typeof keys == 'string') {

@@ -33,6 +33,7 @@ const addressHeaderType = (addr: Address) => addr.to_bytes()[0] >> 4
 
 // https://cips.cardano.org/cips/cip19
 export const shelleyPaymentCredType = (addr: Address) => {
+   console.log('shelleyPaymentCredType', addr.to_bech32())
    switch (addressHeaderType(addr)) {
       case 0: return 'PaymentKeyHash'
       case 1: return 'ScriptHash'
