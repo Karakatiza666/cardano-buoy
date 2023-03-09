@@ -1,9 +1,9 @@
 
 // import CSL from '@emurgo/cardano-serialization-lib-browser'
 // import { Loader } from 'cardano-buoy'
-import type { BigNum, TransactionUnspentOutput, Transaction, AssetName, ScriptHash, TransactionBuilder, TransactionOutput, TransactionInput, Address, Value, Language, PlutusData, ExUnits as CSLExUnits, ScriptRef, PlutusScriptSource, PlutusScript, Redeemer, TransactionWitnessSet, Costmdls, PlutusWitnesses, PlutusWitness, Redeemers, PlutusList, TransactionHash } from '@emurgo/cardano-serialization-lib-browser'
+import type { BigNum, TransactionUnspentOutput, Transaction, AssetName, ScriptHash, TransactionBuilder, TransactionOutput, TransactionInput, Address, Value, Language, PlutusData, ExUnits as CSLExUnits, ScriptRef, PlutusScriptSource, PlutusScript, Redeemer, TransactionWitnessSet, Costmdls, PlutusWitnesses, PlutusWitness, Redeemers, PlutusList, TransactionHash, Ed25519KeyHash, Vkeywitness } from '@emurgo/cardano-serialization-lib-browser'
 import type { ProtocolParams } from 'src/types/network'
-import { errorMessage, randomStr, toFraction } from 'ts-practical-fp'
+import { errorMessage, randomStr, toFraction, uniqueOn_ } from 'ts-practical-fp'
 import { ada, checked_add, clamped_add, comparedBigNum, cslClone, cslMax, cslOutputValue, cslUpdateCoin, cslValueWithTokens, fromBigNum, toBigInt, toBigNum, toCSLInt, toCSLTokenExt, uint8ArrayEqual, type CSLToken, type CSLTokenExt } from 'src/csl/value'
 import { calculateMinUtxoAmount } from "@stricahq/typhonjs/dist/utils/utils.js"
 import type { ExUnits } from '@cardano-ogmios/schema';
@@ -31,7 +31,7 @@ import { generateScriptDataHash } from '@stricahq/typhonjs/dist/utils/helpers'
 import { encodeWitnesses } from '@stricahq/typhonjs/dist/utils/encoder'
 import { typhonAdd } from 'src/typhon/math'
 import { valueCSLToTyphon } from 'src/typhon/common'
-import { addFrom, appendIterable, foreachIterable, fromCslIterable, mapIterable, toCslIterable } from 'src/csl/iterable'
+import { addFrom, appendIterable, cslFilter, foreachIterable, fromCslIterable, mapIterable, toCslIterable } from 'src/csl/iterable'
 
 export function makeTxBuilderCfg (protocol: ProtocolParams) {
    const makeInterval = (n: number) => {
@@ -606,17 +606,14 @@ const fetchCostmdls = (ctx: {protocolParams: ProtocolParams}) => {
    return costmdls
 }
 
-const completeDummy = (
+const completeDummy = async (
    ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
-   costmdls: Costmdls,
-   pagination: () => () => Promise<TransactionUnspentOutput | null>) =>
-   async (result: BuilderResult) => {
-   processScriptDataHash(costmdls, result)
-   const dummyTx = await dummySignTx(costmdls, result, pagination)
-   console.log('dummy tx', dummyTx.to_json())
-   const { rawEval, cost /*, totalExUnits */ } = await evalCSLTx(ctx)(dummyTx)
+   dummyTx: Transaction, expectedSignatures: Ed25519KeyHash[]) =>  {
+   const signedDummyTx = await dummySignTx(dummyTx, expectedSignatures)
+   console.log('dummy tx', signedDummyTx.to_json())
+   const { rawEval, cost /*, totalExUnits */ } = await evalCSLTx(ctx)(signedDummyTx)
    const { totalExUnits, additionalFee } = evaluationTotalAndFee(ctx.protocolParams, rawEval)
-   const fee = cslCalculateFee(ctx.protocolParams, dummyTx, totalExUnits).checked_add(additionalFee)
+   const fee = cslCalculateFee(ctx.protocolParams, signedDummyTx, totalExUnits).checked_add(additionalFee)
    return { cost, fee }
 }
 
@@ -653,20 +650,52 @@ const isValidResult = <R>(r: R | Error | null): r is R => nonNull(r) && !(r inst
 //    return r !== null;
 // };
 
+// const processSimpleResult = (
+//    ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
+//    api: WalletCIP30ApiInstance,
+//    cost: EvaluationCost,
+//    fee: BigNum,
+//    func: ) => async (input: TransactionUnspentOutput) => {
+   
+// }
+
+const processDummy = (
+   ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
+   costmdls: Costmdls,
+   getSignatures: (tx: Transaction) => Promise<Ed25519KeyHash[]>) =>
+   async (result: BuilderResult) => {
+   const tx = buildResult(costmdls)(result)
+   const expectedSignatures = await getSignatures(tx)
+   return completeDummy(ctx, tx, expectedSignatures)
+}
+
+const processReal = (
+   api: WalletCIP30ApiInstance,
+   costmdls: Costmdls) =>
+   async (result: BuilderResult) => {
+   const tx = buildResult(costmdls)(result)
+   return signTx(api, tx)
+}
+
 const simpleTxIteration = (
    ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
+   api: WalletCIP30ApiInstance,
    strategy: SimpleTxStrategy,
    constraints: CSLPipeTxConstraints,
    dummyFee: BigNum,
    costmdls: Costmdls,
    pagination: () => () => Promise<TransactionUnspentOutput | null>) =>
    async (input: TransactionUnspentOutput) => {
-   const strat = await strategy.simple(dummyEval, constraintsWithFee(constraints, dummyFee), input)
-   if (!isValidResult(strat)) return strat
-   const {cost, fee} = await completeDummy(ctx, costmdls, pagination)(strat)
-   const real = await strategy.simple(cost, constraintsWithFee(constraints, fee), input)
-   if (!isValidResult(real)) return real
-   return buildResult(costmdls)(real)
+
+   const getSignatures = getExpectedWalletSignatures(pagination)
+
+   const dummyBuilder = await strategy.simple(dummyEval, constraintsWithFee(constraints, dummyFee), input)
+   if (!isValidResult(dummyBuilder)) return dummyBuilder
+   const {cost, fee} = await processDummy(ctx, costmdls, getSignatures)(dummyBuilder)
+
+   const realBuilder = await strategy.simple(cost, constraintsWithFee(constraints, fee), input)
+   if (!isValidResult(realBuilder)) return realBuilder
+   return processReal(api, costmdls)(realBuilder)
 }
 
 const trySimpleTxStrategy = async (
@@ -686,7 +715,7 @@ const trySimpleTxStrategy = async (
    const iterator = pagination()
    let next : TransactionUnspentOutput | null = null
    while (!isValidResult(result) && (next = await iterator())) {
-      result = await simpleTxIteration(ctx, strategy, constraints, dummyFee, costmdls, pagination)(next)
+      result = await simpleTxIteration(ctx, api, strategy, constraints, dummyFee, costmdls, pagination)(next)
    }
    return result
 }
@@ -705,11 +734,12 @@ const tryComplexTxStrategy = async (
    pagination: () => () => Promise<TransactionUnspentOutput | null>) => {
    console.log('tryComplexTxStrategy')
    const utxoKey = (u: TransactionUnspentOutput) => txOutRefBytes(u.input())
+   const getSignatures = getExpectedWalletSignatures(pagination)
    const evaluated = await strategy.complex(
       dummyEval,
       constraintsWithFee(constraints, dummyFee),
       pickRecursiveIgnore(pagination, utxoKey),
-      completeDummy(ctx, costmdls, pagination)
+      processDummy(ctx, costmdls, getSignatures)
    )
    console.log('tryComplexTxStrategy dummy done')
    if (!isValidResult(evaluated)) return evaluated
@@ -718,7 +748,7 @@ const tryComplexTxStrategy = async (
       evaluated.cost,
       constraintsWithFee(constraints, evaluated.fee),
       pickRecursiveIgnore(pagination, utxoKey),
-      buildResult(costmdls)
+      processReal(api, costmdls)
    )
    console.log('tryComplexTxStrategy real done')
    return real
@@ -758,15 +788,15 @@ export const runStrategies = async (
 
    if (!result) throw new Error('Couldn\'t find UTxO suitable for transaction!')
    if (result instanceof Error) throw result
-   const signed = await signTx(api, result)
-   console.log('FINAL tx')
-   console.log(signed.to_json())
-   const doSubmit = () => api.submitTx(toHexed(signed))
-   let submit = doSubmit();
+   // const signed = await signTx(api, result)
+   console.log('FINAL tx', result.to_json())
+   const doSubmit = (tx: Transaction) => api.submitTx(toHexed(tx))
+   let submit = doSubmit(result);
 
    (result => {
       // TODO: temporary workaround until https://github.com/Emurgo/cardano-serialization-lib/issues/572 is fixed
       submit = submit.catch((e: Error) => {
+         console.log('Caugh on submit:', e)
          const tests = [
             /PPViewHashesDontMatch (?:(?:SNothing)|(?:\(SJust.+\))) \(SJust \(SafeHash \\?"([a-f0-9]{64})/,
             /(?:inferredFromParameters":")([a-f0-9]{64})/
@@ -801,14 +831,16 @@ export const runStrategies = async (
       // ))
    }
    // Send tx through ogmios to increase chances of success
-   const submitOgmios = makeOgmiosContext(ctx)
-      .then(createTxSubmissionClient)
-      .then(ogmios => {
-         const submitOgmios = ogmios.submitTx(toHexed(signed))
-         submitOgmios.then(() => ogmios.shutdown(), () => ogmios.shutdown())
-         return submitOgmios
-      })
-      .catch(e => { throw new Error(e.message ?? 'Unknown Ogmios submission error') })
+   const submitOgmios = ((result) =>
+      makeOgmiosContext(ctx)
+         .then(createTxSubmissionClient)
+         .then(ogmios => {
+            const submitOgmios = ogmios.submitTx(toHexed(result))
+            submitOgmios.then(() => ogmios.shutdown(), () => ogmios.shutdown())
+            return submitOgmios
+         })
+         .catch(e => { throw new Error(e.message ?? 'Unknown Ogmios submission error') })
+   )(result)
 
    // const ogmios = await makeOgmiosContext(ctx).then(createTxSubmissionClient)
    // const submit = ogmios.submitTx(toHexed(signed))
@@ -824,15 +856,11 @@ const mkdDummyWitness = (hash: TransactionHash) => {
    return LCSL.make_vkey_witness(hash, dummyKey)
 }
 
-export const dummySignTx = async (costmdls: Costmdls, txBuilder: BuilderResult,
-   pagination: () => () => Promise<TransactionUnspentOutput | null>) => {
-   const tx = buildResult(costmdls)(txBuilder)
-   // console.log('built size: ', txBuilder.full_size())
+export const dummySignTx = async (tx: Transaction, expectedSignatures: Ed25519KeyHash[]) => {
    const hash = LCSL.hash_transaction(tx.body())
-   const signaturesQty = await getExpectedWalletSignaturesQty(tx, pagination)
    const witnessSet = tx.witness_set()
    const vkeys = witnessSet.vkeys() ?? LCSL.Vkeywitnesses.new()
-   for (let i = 0; i < signaturesQty; ++i) {
+   for (let i = 0; i < expectedSignatures.length; ++i) {
       vkeys.add(mkdDummyWitness(hash))
    }
    witnessSet.set_vkeys(vkeys)
@@ -855,15 +883,20 @@ const requireInputUTxO = (pagination: () => () => Promise<TransactionUnspentOutp
    return utxo
 }
 
-const getExpectedWalletSignaturesQty = async (tx: Transaction, pagination: () => () => Promise<TransactionUnspentOutput | null>) => {
-   const utxos = await Promise.all(fromCslIterable(tx.body().inputs()).map(requireInputUTxO(pagination)))
-   return unique(
-      utxos
-      .filter(nonNull)
-      .map(u => u.output().address())
-      .filter(a => shelleyPaymentCredType(a) == 'PaymentKeyHash')
-      .map(a => a.to_hex())
-   ).length
+const getExpectedWalletSignatures = (pagination: () => () => Promise<TransactionUnspentOutput | null>) => async (tx: Transaction) => {
+   const inputs = [...fromCslIterable(tx.body().inputs()), ...fromCslIterable(tx.body().collateral() ?? LCSL.TransactionInputs.new())]
+   const utxos = await Promise.all(inputs.map(requireInputUTxO(pagination)))
+   return uniqueOn_(x => x.to_hex(),
+      [
+         ...utxos
+            .filter(nonNull)
+            .map(u => u.output().address())
+            .filter(a => shelleyPaymentCredType(a) == 'PaymentKeyHash')
+            .map(a => (LCSL.BaseAddress.from_address(a) ?? LCSL.EnterpriseAddress.from_address(a))!.payment_cred().to_keyhash())
+            .filter(nonNull),
+         ...fromCslIterable(tx.body().required_signers() ?? LCSL.Ed25519KeyHashes.new())
+      ]
+   )
 }
 
 export async function signTx(wallet: WalletCIP30ApiInstance, tx: Transaction) {
@@ -876,6 +909,29 @@ export async function signTx(wallet: WalletCIP30ApiInstance, tx: Transaction) {
       throw new Error('Failed to sign transaction')
    }
    witnessSet.set_vkeys(vkeys)
+   const signedTx = LCSL.Transaction.new(
+      tx.body(), // txBody
+      witnessSet,
+      tx.auxiliary_data()
+   )
+   return signedTx
+}
+
+export async function signTxExpected(wallet: WalletCIP30ApiInstance, tx: Transaction, expected: Ed25519KeyHash[]) {
+   const witnessSet = tx.witness_set()
+   const txVkeyWitnessSet = fromHexed(LCSL.TransactionWitnessSet)
+      (await wallet.signTx(toHexed(tx), true)
+      .catch(rejectWith))
+   const vkeys = txVkeyWitnessSet.vkeys()
+   if (!vkeys) {
+      throw new Error('Failed to sign transaction')
+   }
+
+   const expectedSet = new Set(expected.map(h => h.to_hex()))
+   const isExpected = (key: Vkeywitness) => expectedSet.has(key.vkey().public_key().hash().to_hex())
+   const expectedVkeys = cslFilter(LCSL.Vkeywitnesses.new(), isExpected, vkeys)
+
+   witnessSet.set_vkeys(expectedVkeys)
    const signedTx = LCSL.Transaction.new(
       tx.body(), // txBody
       witnessSet,
