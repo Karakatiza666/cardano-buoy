@@ -3,7 +3,6 @@
 import type { Address, DatumSource, Language, PlutusData, PlutusScriptSource, TransactionInput, TransactionUnspentOutput, Value } from "@emurgo/cardano-serialization-lib-browser"
 import { HashType, type ExUnits, type Input, type NetworkId, type ShelleyAddress } from "@stricahq/typhonjs/dist/types.js"
 import type Typhon from "@stricahq/typhonjs/dist/types.js"
-import BigNumber from "bignumber.js"
 import { fromHex, makeHex, numToHex, type Hex } from "ts-binary-newtypes"
 import type { GQLTransactionOutput } from 'src/graphql/types'
 import type { Output, Token, TokenClass, TxIn, TyphonValue } from "src/typhon/api"
@@ -67,7 +66,8 @@ export const cslExUnits = (cost: ExUnits) => LCSL.ExUnits.new(toBigNum(cost.mem)
 // }
 export const cslPlutusV1 = () => LCSL.Language.new_plutus_v1()
 export const cslPlutusV2 = () => LCSL.Language.new_plutus_v2()
-export const gqlLanguage = (ver: 'plutusV1' | 'plutusV2') => ({
+export type PlutusLangVer = 'plutusV1' | 'plutusV2'
+export const gqlLanguage = (ver: PlutusLangVer) => ({
    'plutusV1': LCSL.Language.new_plutus_v1(),
    'plutusV2': LCSL.Language.new_plutus_v2()
 })[ver] ?? (() => { throw new Error(`Unknown plutus version ${ver}`)})()
@@ -120,8 +120,6 @@ export type UTxODatumInfoCSL = {
    }
 } // & OptionalIntersection<{datumHash: DatumSource} | {datumRef: DatumSource}>
 
-export type GQLUTxOWithDatum = Omit<GQLTransactionOutput, 'datum'> & UTxODatumInfoPlain
-
 export type TransactionUnspentOutputExt = TransactionUnspentOutput & UTxODatumInfoCSL 
 
 export const requireExtDatumSource = (o: TransactionUnspentOutputExt) =>
@@ -135,73 +133,6 @@ export const requireExtDatumHash = (o: TransactionUnspentOutputExt) =>
 
 export type UtxoGQLToCSLParam = { inlineDatum: boolean }
 
-export const utxoGQLToCSL = (params?: UtxoGQLToCSLParam) => (o: GQLUTxOWithDatum) => {// (o: GQLTransactionOutput) => {
-   const tokens = o.tokens.map(t => ({...t.asset, amount: new BigNumber(t.quantity)}))
-   const value = { amount: new BigNumber(o.value), tokens }
-   const input = LCSL.TransactionInput.new(LCSL.TransactionHash.from_hex(o.txHash), o.index)
-   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-   const output = LCSL.TransactionOutput.new(LCSL.Address.from_bech32(o.address), valueTyphonToCSL(value)!)
-   const utxo: TransactionUnspentOutputExt = LCSL.TransactionUnspentOutput.new(input, output)
-   console.log('utxoGQLToCSL', o)
-   if (o.script) {
-      utxo.scriptRef = LCSL.PlutusScriptSource.new_ref_input_with_lang_ver(
-         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-         LCSL.ScriptHash.from_hex(o.script.hash),
-         input,
-         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-         gqlLanguage(o.script.type)
-      )
-      console.log('utxoGQLToCSL', o.script.hash, input.transaction_id().to_hex(), gqlLanguage(o.script.type).to_json())
-   }
-   // if (o.datum) {
-   //    // TODO: figure out if it is possible to discern inline datum and hash datum only with graphql results
-   //    const plutus = LCSL.PlutusData.from_hex(o.datum.bytes)
-   //    const json = o.datum.value
-   //    utxo.datum = params?.inlineDatum
-   //       ? {
-   //          ref: input,
-   //          source: LCSL.DatumSource.new_ref_input(input),
-   //          plutus, json
-   //       }
-   //       : {
-   //          hash: o.datum.hash,
-   //          source: LCSL.DatumSource.new(plutus),
-   //          plutus, json
-   //       }
-   // }
-   if (o.datum) {
-      // TODO: figure out if it is possible to discern inline datum and hash datum only with graphql results
-      // const plutus = LCSL.PlutusData.from_hex(o.datum.bytes)
-      const plutus = LCSL.PlutusData.from_json(
-         JSON.stringify(o.datum.json),
-         LCSL.PlutusDatumSchema.DetailedSchema
-      )
-      const json = o.datum.json
-      utxo.datum = 'hash' in o.datum
-         ? {
-            hash: o.datum.hash,
-            source: LCSL.DatumSource.new(plutus),
-            plutus, json
-         }
-         : {
-            ref: input,
-            source: LCSL.DatumSource.new_ref_input(input),
-            plutus, json
-         }
-      // utxo.datum = params?.inlineDatum
-      //    ? {
-      //       ref: input,
-      //       source: LCSL.DatumSource.new_ref_input(input),
-      //       plutus, json
-      //    }
-      //    : {
-      //       hash: o.datum.hash,
-      //       source: LCSL.DatumSource.new(plutus),
-      //       plutus, json
-      //    }
-   }
-   return utxo
-}
 
 export const cslScriptHash = (policyId: Hex) => LCSL.ScriptHash.from_hex(policyId)
 export const cslAssetName = (assetName: Hex) => LCSL.AssetName.new(fromHex(assetName))

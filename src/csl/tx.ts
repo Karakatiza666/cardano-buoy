@@ -32,8 +32,17 @@ import { encodeWitnesses } from '@stricahq/typhonjs/dist/utils/encoder'
 import { typhonAdd } from 'src/typhon/math'
 import { valueCSLToTyphon } from 'src/typhon/common'
 import { addFrom, appendIterable, cslFilter, foreachIterable, fromCslIterable, mapIterable, toCslIterable } from 'src/csl/iterable'
+import { components } from '@blockfrost/openapi'
 
-export function makeTxBuilderCfg (protocol: ProtocolParams) {
+export function makeTxBuilderCfg({protocolParams}: { protocolParams: ProtocolParams | components['schemas']['epoch_param_content']}) {
+   if ('maxTxSize' in protocolParams) {
+      return makeTxBuilderCfgGraphql({protocolParams})
+   } else if ('max_tx_size' in protocolParams) {
+      return makeTxBuilderCfgBlockfrost({protocolParams})
+   }
+}
+
+export function makeTxBuilderCfgGraphql({protocolParams: protocol}: {protocolParams: ProtocolParams}) {
    const makeInterval = (n: number) => {
       const {numerator, denominator} = toFraction(n)
       return LCSL.UnitInterval.new(toBigNum(numerator), toBigNum(denominator))
@@ -52,7 +61,30 @@ export function makeTxBuilderCfg (protocol: ProtocolParams) {
          makeInterval(protocol.priceMem),
          makeInterval(protocol.priceStep)
       ))
-      .prefer_pure_change(false)
+      .prefer_pure_change(true)
+      .build()
+}
+
+export function makeTxBuilderCfgBlockfrost({protocolParams: protocol}: {protocolParams: components['schemas']['epoch_param_content']}) {
+   const makeInterval = (n: number) => {
+      const {numerator, denominator} = toFraction(n)
+      return LCSL.UnitInterval.new(toBigNum(numerator), toBigNum(denominator))
+   }
+   return LCSL.TransactionBuilderConfigBuilder.new()
+      .fee_algo(LCSL.LinearFee.new(
+         toBigNum(protocol.min_fee_a),
+         toBigNum(protocol.min_fee_b)
+      ))
+      .pool_deposit(toBigNum(protocol.pool_deposit))
+      .key_deposit(toBigNum(protocol.key_deposit))
+      .max_value_size(Number(protocol.max_val_size))
+      .max_tx_size(protocol.max_tx_size)
+      .coins_per_utxo_byte(toBigNum(protocol.coins_per_utxo_size ?? 'NaN'))
+      .ex_unit_prices(LCSL.ExUnitPrices.new(
+         makeInterval(protocol.price_mem ?? -1),
+         makeInterval(protocol.price_step ?? -1)
+      ))
+      .prefer_pure_change(true)
       .build()
 }
 

@@ -1,14 +1,19 @@
-import type { AssetName, ScriptHash, BigNum, Value, TransactionOutput, TransactionUnspentOutput, Address } from '@emurgo/cardano-serialization-lib-browser'
+import type { AssetName, ScriptHash, BigNum, Value, TransactionOutput, TransactionUnspentOutput, Address, MultiAsset } from '@emurgo/cardano-serialization-lib-browser'
 // import CSL from '@emurgo/cardano-serialization-lib-browser'
 // import { Loader } from 'cardano-buoy'
 import { fromHex, makeHex, toHex } from 'ts-binary-newtypes'
-import { tuple } from 'ts-practical-fp'
+import { tuple, use } from 'ts-practical-fp'
 import { BigNumber } from 'bignumber.js'
 import type { Token, TyphonValue } from 'src/typhon/api'
 import { nonNull } from 'ts-practical-fp'
+import { aclTyphonToCSL, unitAssetClass } from '..'
 
 // Remember - BigNum is always positive! Int can be negative
-export const toBigNum = (n: number | BigNumber) => LCSL.BigNum.from_str(typeof n == 'number' ? n.toString() : n.toFixed())
+export const toBigNum = (n: number | BigNumber | string) =>
+   LCSL.BigNum.from_str(
+        typeof n == 'number' ? n.toString() 
+      : typeof n == 'string' ? n
+      :                        n.toFixed())
 export const fromBigNum = (n: BigNum) => new BigNumber(n.to_str())
 export const toCSLInt = (amount: BigNumber) => amount.gte(0) ? LCSL.Int.new(toBigNum(amount)) : LCSL.Int.new_negative(toBigNum(amount.negated()))
 export const copyBigNum = (b: BigNum) => cslClone(LCSL.BigNum, b)
@@ -35,6 +40,24 @@ export type CSLToken = {policyId: ScriptHash, assetName: AssetName, amount: BigN
 export type CSLTokenExt = {policyId: ScriptHash, assetName: AssetName, amount: BigNumber}
 export const toCSLTokenExt = (t: CSLToken): CSLTokenExt => ({...t, amount: fromBigNum(t.amount)})
 
+// =================================================================
+
+export const valueBlockfrostToCSL = (value: {
+   unit: string
+   quantity: string
+}[]) =>
+   value.reduce((acc, {unit, quantity}) => {
+      const acl = unitAssetClass(unit)
+      acl == 'lovelace'
+         ? acc.set_coin(toBigNum(quantity))
+         : acc.set_multiasset(use<MultiAsset>
+            (m => (a => m.set_asset(a.policyId, a.assetName, toBigNum(quantity)))(aclTyphonToCSL(acl)))
+            (acc.multiasset() ?? LCSL.MultiAsset.new())
+         )
+      return acc
+   }, LCSL.Value.zero())
+
+// =================================================================
 
 const adaPolicy = fromHex(makeHex('00000000000000000000000000000000000000000000000000000000'))
 const adaToken = fromHex(makeHex('00'))

@@ -1,3 +1,36 @@
+type CostModelVersions = 'PlutusV1' | 'PlutusV2'
+
+function switchCostModelObject(version: CostModelVersions) {
+   switch(version) {
+      case 'PlutusV1': return costModelObjectV1
+      case 'PlutusV2': return costModelObjectV2
+   }
+}
+
+type PP<Versions extends string, Field extends string> = {
+   [key in Field]: {
+      [version in Versions]: Record<string, number> | unknown
+   } | null | undefined
+}
+
+export const injectCostModelObject = <
+   Version extends CostModelVersions,
+   Field extends string,
+   Params extends PP<string /*Version*/, Field>
+>(key: Field) => (pp: Params) => {
+   const costModels = pp[key]
+   if (!costModels) {
+      throw new Error('injectCostModelObject: Cost models not found!')
+   }
+   const costModel = {} as Record<Version, number[]>;
+   for (const version of Object.keys(costModels) as Version[]) {
+      costModel[version] = switchCostModelObject(version)(costModels[version] as Record<string, number>);
+   }
+   return {
+      ...pp,
+      costModel
+   }
+}
 
 export function costModelObjectV1(model: Record<string, number>) {
    return [

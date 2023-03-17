@@ -1,8 +1,9 @@
+import { components } from "@blockfrost/openapi"
+
 export type ProtocolParams = {
    a0: number,
    coinsPerUtxoByte: number,
    collateralPercent: number,
-   costModel: PlutusVersion<number[]>,
    costModels: PlutusVersion<LanguageViewV1, LanguageViewV2>,
    decentralisationParam: number,
    eMax: number,
@@ -31,7 +32,46 @@ export type ProtocolParams = {
    },
    rho: number,
    tau: number
-}
+} & { costModel: PlutusVersion<number[]> }
+
+export type BlockfrostProtocolParams = components['schemas']['epoch_param_content']
+   & {
+      costModel: PlutusVersion<number[]>
+   }
+
+const throww = (str: string) => { throw new Error(str) }
+
+export const ppBlockfrostToGql = (pp: BlockfrostProtocolParams): ProtocolParams => ({
+   a0: pp.a0,
+   coinsPerUtxoByte: parseInt(pp.coins_per_utxo_size ?? throww('coins_per_utxo_size not found')),
+   collateralPercent: pp.collateral_percent ?? throww(' not found'),
+   costModels: pp.cost_models as ProtocolParams['costModels'] ?? throww(' not found'),
+   costModel: pp.costModel,
+   decentralisationParam: pp.decentralisation_param,
+   eMax: pp.e_max,
+   extraEntropy: pp.extra_entropy || '',
+   keyDeposit: parseInt(pp.key_deposit),
+   maxBlockBodySize: pp.max_block_size,
+   maxBlockExMem: pp.max_block_ex_mem || '',
+   maxBlockExSteps: pp.max_block_ex_steps || '',
+   maxBlockHeaderSize: pp.max_block_header_size,
+   maxCollateralInputs: pp.max_collateral_inputs || 0,
+   maxTxExMem: pp.max_tx_ex_mem || '',
+   maxTxExSteps: pp.max_tx_ex_steps || '',
+   maxTxSize: pp.max_tx_size,
+   maxValSize: pp.max_val_size || '',
+   minFeeA: pp.min_fee_a,
+   minFeeB: pp.min_fee_b,
+   minPoolCost: parseFloat(pp.min_pool_cost),
+   minUTxOValue: parseFloat(pp.min_utxo),
+   nOpt: pp.n_opt,
+   poolDeposit: parseFloat(pp.pool_deposit),
+   priceMem: pp.price_mem || 0,
+   priceStep: pp.price_step || 0,
+   protocolVersion: { major: pp.protocol_major_ver, minor: pp.protocol_minor_ver },
+   rho: pp.rho,
+   tau: pp.tau,
+})
 
 type PlutusVersion<V1, V2 = V1> = {
    PlutusV1: V1
