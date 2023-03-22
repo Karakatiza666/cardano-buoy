@@ -33,6 +33,8 @@ import { typhonAdd } from 'src/typhon/math'
 import { valueCSLToTyphon } from 'src/typhon/common'
 import { addFrom, appendIterable, cslFilter, foreachIterable, fromCslIterable, mapIterable, toCslIterable } from 'src/csl/iterable'
 import { components } from '@blockfrost/openapi'
+import { BlockFrostAPI } from '@blockfrost/blockfrost-js'
+import { EvaluationResult } from '@cardano-ogmios/client/dist/TxSubmission/index.js'
 
 export function makeTxBuilderCfg({protocolParams}: { protocolParams: ProtocolParams | components['schemas']['epoch_param_content']}) {
    if ('maxTxSize' in protocolParams) {
@@ -639,11 +641,12 @@ const fetchCostmdls = (ctx: {protocolParams: ProtocolParams}) => {
 }
 
 const completeDummy = async (
-   ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
+   ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
    dummyTx: Transaction, expectedSignatures: Ed25519KeyHash[]) =>  {
    const signedDummyTx = await dummySignTx(dummyTx, expectedSignatures)
    console.log('dummy tx', signedDummyTx.to_json())
-   const { rawEval, cost /*, totalExUnits */ } = await evalCSLTx(ctx)(signedDummyTx)
+   // const { rawEval, cost } = await cslEvalTxOgmios(ctx)(signedDummyTx)
+   const { rawEval, cost } = await cslEvalTxBlockfrost(ctx)(signedDummyTx)
    const { totalExUnits, additionalFee } = evaluationTotalAndFee(ctx.protocolParams, rawEval)
    const fee = cslCalculateFee(ctx.protocolParams, signedDummyTx, totalExUnits).checked_add(additionalFee)
    return { cost, fee }
@@ -692,7 +695,7 @@ const isValidResult = <R>(r: R | Error | null): r is R => nonNull(r) && !(r inst
 // }
 
 const processDummy = (
-   ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
+   ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
    costmdls: Costmdls,
    getSignatures: (tx: Transaction) => Promise<Ed25519KeyHash[]>) =>
    async (result: BuilderResult) => {
@@ -710,7 +713,7 @@ const processReal = (
 }
 
 const simpleTxIteration = (
-   ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
+   ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
    api: WalletCIP30ApiInstance,
    strategy: SimpleTxStrategy,
    constraints: CSLPipeTxConstraints,
@@ -731,7 +734,7 @@ const simpleTxIteration = (
 }
 
 const trySimpleTxStrategy = async (
-   ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
+   ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
    api: WalletCIP30ApiInstance,
    strategy: SimpleTxStrategy,
    constraints: CSLPipeTxConstraints,
@@ -757,7 +760,7 @@ const trySimpleTxStrategy = async (
 // Failed step of ComplexTxStrategy should not have mutated builder state
 // TODO: implement: When the check of built tx fails - the last step of the build is removed and other inputs are considered
 const tryComplexTxStrategy = async (
-   ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
+   ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
    api: WalletCIP30ApiInstance,
    strategy: ComplexTxStrategy,
    constraints: CSLPipeTxConstraints,
@@ -796,7 +799,7 @@ const getUTxOPage = (api: WalletCIP30ApiInstance, limit: number) => (param: {pag
    // .then(us => ((us ?? []).forEach(u => console.log('getUTxOPage', u.to_json())), us))
 
 export const runStrategies = async (
-   ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams, ttlSeconds: number},
+   ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams, ttlSeconds: number},
    api: WalletCIP30ApiInstance,
    constraints: CSLPipeTxConstraints,
    dummyFee: BigNum,
@@ -863,21 +866,21 @@ export const runStrategies = async (
       // ))
    }
    // Send tx through ogmios to increase chances of success
-   const submitOgmios = ((result) =>
-      makeOgmiosContext(ctx)
-         .then(createTxSubmissionClient)
-         .then(ogmios => {
-            const submitOgmios = ogmios.submitTx(toHexed(result))
-            submitOgmios.then(() => ogmios.shutdown(), () => ogmios.shutdown())
-            return submitOgmios
-         })
-         .catch(e => { throw new Error(e.message ?? 'Unknown Ogmios submission error') })
-   )(result)
+   // const submitOgmios = ((result) =>
+   //    makeOgmiosContext(ctx)
+   //       .then(createTxSubmissionClient)
+   //       .then(ogmios => {
+   //          const submitOgmios = ogmios.submitTx(toHexed(result))
+   //          submitOgmios.then(() => ogmios.shutdown(), () => ogmios.shutdown())
+   //          return submitOgmios
+   //       })
+   //       .catch(e => { throw new Error(e.message ?? 'Unknown Ogmios submission error') })
+   // )(result)
 
    // const ogmios = await makeOgmiosContext(ctx).then(createTxSubmissionClient)
    // const submit = ogmios.submitTx(toHexed(signed))
    // return makeHex(await Promise.any([submit, submitOgmios]))
-   return Promise.any([submit, submitOgmios]).then(makeHex, (e: AggregateError) => {
+   return Promise.any([submit /*, submitOgmios*/]).then(makeHex, (e: AggregateError) => {
       throw new Error(e.errors.map(errorMessage).join(';'))
    })
 }
@@ -972,22 +975,22 @@ export async function signTxExpected(wallet: WalletCIP30ApiInstance, tx: Transac
    return signedTx
 }
 
-export const evalCSLTx = (ctx: {ogmiosEndpoint: string}) => async (tx: Transaction) => {
-   console.log('in evalCSLTx', toHex(tx.to_bytes()))
+export const cslEvalTxOgmios = (ctx: {ogmiosEndpoint: string}) => async (tx: Transaction) => {
+   console.log('in cslEvalTxOgmios', toHex(tx.to_bytes()))
    const ogmios = await makeOgmiosContext(ctx).then(createTxSubmissionClient)
-   // const res = await retry(
-   //   () => ogmios.evaluateTx(toHex(tx.to_bytes())),
-   //   {retries: 2, retryIf: not(isOgmiosEvaluationError)}
-   // )
-   // LCSL.Transaction.from_hex(toHex(tx.to_bytes()))
    const res = await ogmios.evaluateTx(tx.to_hex())
    ogmios.shutdown()
    console.log('raw ogmios eval', res)
    const cost = evaluated(res)
-   // const totalExUnits = Object.values(res).reduce((acc, cur) =>
-   //    ({ memory: acc.memory + cur.memory, steps: acc.steps + cur.steps }),
-   //    { memory: 0, steps: 0 })
-   return { rawEval: Object.values(res), cost /*, totalExUnits*/ }
+   return { rawEval: Object.values(res), cost }
+}
+
+export const cslEvalTxBlockfrost = (ctx: {blockfrostApi: BlockFrostAPI}) => async (tx: Transaction) => {
+   console.log('in cslEvalTxBlockfrost', toHex(tx.to_bytes()))
+   const res = (await (ctx.blockfrostApi as any).utilsTxsEvaluate(tx.to_hex())).result.EvaluationResult as EvaluationResult
+   console.log('raw blockfrost eval', res)
+   const cost = evaluated(res)
+   return { rawEval: Object.values(res), cost }
 }
 
 // ========= =========
