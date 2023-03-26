@@ -1,4 +1,4 @@
-export type WalletCandidate = { name: string, icon: string }
+import { WalletCandidate } from "src/types/wallet";
 
 declare global {
    interface Window {

@@ -1,12 +1,12 @@
-import type { WalletCandidate } from "src/global";
 import type { WalletCIP30Api, WalletCIP30ApiInstance } from "src/cip30/api";
 import { mapFromHexed, fromHexed } from "ts-binary-newtypes";
-import { paginatedLookupAll } from "ts-practical-fp";
+import { isEmptyObj, paginatedLookupAll } from "ts-practical-fp";
 import { cslHasAnyTokens, cslValueHasCurrency, cslValueToken } from "src/csl/value";
 import { aclTyphonToCSL, cslAssetName, cslScriptHash } from "src/csl/common";
 import { singleton } from "ts-practical-fp";
 import type { Hex } from "ts-binary-newtypes";
 import type { TokenClass } from "src/typhon/api";
+import { WalletCandidate } from "src/types/wallet";
 
 export const extractCip30Api = ([key, candidate]: [string, WalletCandidate]) => {
    if ('apiVersion' in candidate) {
@@ -72,3 +72,39 @@ export const fetchAllWalletUTxOs_ =
             .find(tcl => !cslValueToken(aclTyphonToCSL(tcl), amount).is_zero())
       }
    })
+
+export const enablePatchCIP30 = async (api: WalletCIP30Api & { key: string }) => {
+   let instance = await api.enable()
+   if (!instance.getCollateral) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      instance.getCollateral = (instance as any).experimental?.getCollateral
+   }
+   // Workarounds for wallets that incorrectly implement CIP30 spec
+   if (api.key == 'flint') {
+      instance.getUtxos = ((f) => async (amount, paginate) => {
+         const res = await f(amount)
+         if (paginate?.limit == res.length && paginate?.page) {
+            // Return empty page if second page was requested by mistake
+            return []
+         }
+         return res
+      })(instance.getUtxos)
+   } else if (api.key == 'yoroi') {
+      const getCollateral = (f => ((arg) =>
+         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         f(arg?.amount as any)) as typeof f
+      )(instance.getCollateral.bind(instance))
+
+      instance = Object.assign(Object.create(Object.getPrototypeOf(instance)), instance, {
+         getCollateral,
+      })
+   } else if (api.key == 'begin') {
+      instance.signTx = (signTx => (tx, partialSign) =>
+         signTx(tx, partialSign).then(res => !isEmptyObj(res)
+            ? res
+            : (() => { throw new Error('User declined to sign the transaction') })()
+         )
+      )(instance.signTx)
+   }
+   return instance
+}

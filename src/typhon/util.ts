@@ -1,4 +1,4 @@
-import type { WalletCandidate } from "src/global"
+import { WalletCandidate } from "src/types/wallet"
 import type { WalletTyphonApi } from "src/typhon/api"
 
 export const extractTyphonApi = ([key, candidate]: [string, WalletCandidate]) => {

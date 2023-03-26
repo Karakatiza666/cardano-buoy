@@ -1,6 +1,6 @@
 
-import type { WalletCandidate } from "src/global"
 import { apply, callNonNull, firstNonNull, tuple, nonNull } from "ts-practical-fp"
+import { WalletCandidate } from "src/types/wallet"
 
 export function fetchConnectors<T>(w: Window, extractors: ((c: [string, WalletCandidate]) => T | null)[])  {
    const usedNames = new Set<string>()
@@ -14,7 +14,7 @@ export function fetchConnectors<T>(w: Window, extractors: ((c: [string, WalletCa
       .filter(([,c]) =>
          !usedNames.has(c.name) && (usedNames.add(c.name), true)
       )
-      .map(w => ((w[1].icon = w[1].icon ?? knownConnectorIcons[w[1].name]), w))
+      // .map(w => ((w[1].icon = w[1].icon ?? knownConnectorIcons[w[1].name]), w))
       .map(w => firstNonNull(apply(w))(extractors))
       .filter(nonNull)
 }
