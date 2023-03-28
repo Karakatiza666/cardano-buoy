@@ -2,12 +2,12 @@
 import { apply, callNonNull, firstNonNull, tuple, nonNull } from "ts-practical-fp"
 import { WalletCandidate } from "src/types/wallet"
 
-export function fetchConnectors<T>(w: Window, extractors: ((c: [string, WalletCandidate]) => T | null)[])  {
+export function fetchConnectors<T>(w: Record<string, WalletCandidate> | undefined, extractors: ((c: [string, WalletCandidate]) => T | null)[])  {
    const usedNames = new Set<string>()
-   if (!w.cardano) {
+   if (!w) {
       return []
    }
-   return Object.entries(w.cardano)
+   return Object.entries(w)
       .filter(([,c]) => {
          return typeof c === 'object' && Object.keys(c).length !== 0
       })
@@ -19,8 +19,8 @@ export function fetchConnectors<T>(w: Window, extractors: ((c: [string, WalletCa
       .filter(nonNull)
 }
 
-export function fetchConnector<T>(w: Window, extractors: ((c: [string, WalletCandidate]) => T | null)[], wallet: string) {
-   return callNonNull(w => firstNonNull(apply(tuple(wallet, w)))(extractors), w.cardano?.[wallet])
+export function fetchConnector<T>(w: Record<string, WalletCandidate> | undefined, extractors: ((c: [string, WalletCandidate]) => T | null)[], wallet: string) {
+   return callNonNull(c => firstNonNull(apply(tuple(wallet, c)))(extractors), w?.[wallet])
 }
 
 const knownConnectorIcons = {
