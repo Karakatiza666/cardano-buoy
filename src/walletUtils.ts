@@ -2,12 +2,12 @@
 import { apply, callNonNull, firstNonNull, tuple, nonNull } from "ts-practical-fp"
 import { WalletCandidate } from "src/types/wallet"
 
-export function fetchConnectors<T>(w: Record<string, WalletCandidate> | undefined, extractors: ((c: [string, WalletCandidate]) => T | null)[])  {
+export const cardanoCandidates = (w: Window) => {
    const usedNames = new Set<string>()
-   if (!w) {
+   if (!w.cardano) {
       return []
    }
-   return Object.entries(w)
+   return Object.entries(w.cardano)
       .filter(([,c]) => {
          return typeof c === 'object' && Object.keys(c).length !== 0
       })
@@ -15,11 +15,15 @@ export function fetchConnectors<T>(w: Record<string, WalletCandidate> | undefine
          !usedNames.has(c.name) && (usedNames.add(c.name), true)
       )
       // .map(w => ((w[1].icon = w[1].icon ?? knownConnectorIcons[w[1].name]), w))
+}
+
+export const fetchConnectors = <Candidate, T>(ws: [string, Candidate][], extractors: ((c: [string, Candidate]) => T | null)[]) => {
+   return ws
       .map(w => firstNonNull(apply(w))(extractors))
       .filter(nonNull)
 }
 
-export function fetchConnector<T>(w: Record<string, WalletCandidate> | undefined, extractors: ((c: [string, WalletCandidate]) => T | null)[], wallet: string) {
+export function fetchConnector<Candidate, T>(w: Record<string, Candidate> | undefined, extractors: ((c: [string, Candidate]) => T | null)[], wallet: string) {
    return callNonNull(c => firstNonNull(apply(tuple(wallet, c)))(extractors), w?.[wallet])
 }
 
