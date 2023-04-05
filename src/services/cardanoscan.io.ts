@@ -19,17 +19,11 @@ export const cardanoscanTokenMetadata = async (token: TokenClass) => {
          {cache: 'default' })).text()
       const mintTxPage = load(xx)
       const metadata: Record<number, unknown> = {}
-      // const z = mintTxPage('#metadata')
-      // mintTxPage('#metadata').find('[data-label][data-value]').each((index, element) => {
-         // console.log('mintTxPage', `https://cardanoscan.io/transaction/${trxHash}?tab=metadata`, xx)
       mintTxPage('#metadata').find('[data-label]').each((index, element) => {
-         // console.log ('cardanoscanTokenMetadata el', element)
          const key = mintTxPage(element).attr('data-label')!;
          const value = mintTxPage(element).attr('data-value')!;
          const meta = JSON.parse(value)
-         // metadata[parseInt(key)]  = meta
          metadata[parseInt(key)] = mapObj(mapObj(filterObject_((v) => !(typeof v == 'object') || Array.isArray(v))))(meta) ;
-         // console.log('cardanoscanTokenMetadata', key, value)
       });
       return metadata as CardanoTokenMetadata
    }
