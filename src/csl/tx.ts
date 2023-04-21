@@ -1,10 +1,10 @@
 
 // import CSL from '@emurgo/cardano-serialization-lib-browser'
 // import { Loader } from 'cardano-buoy'
-import type { BigNum, TransactionUnspentOutput, Transaction, AssetName, ScriptHash, TransactionBuilder, TransactionOutput, TransactionInput, Address, Value, Language, PlutusData, ExUnits as CSLExUnits, ScriptRef, PlutusScriptSource, PlutusScript, Redeemer, TransactionWitnessSet, Costmdls, PlutusWitnesses, PlutusWitness, Redeemers, PlutusList, TransactionHash, Ed25519KeyHash, Vkeywitness } from '@emurgo/cardano-serialization-lib-browser'
+import type { BigNum, TransactionUnspentOutput, Transaction, AssetName, ScriptHash, TransactionBuilder, TransactionOutput, TransactionInput, Address, Value, Language, PlutusData, ExUnits as CSLExUnits, ScriptRef, PlutusScriptSource, PlutusScript, Redeemer, TransactionWitnessSet, Costmdls, PlutusWitnesses, PlutusWitness, Redeemers, PlutusList, TransactionHash, Ed25519KeyHash, Vkeywitness, MintBuilder, MintsAssets } from '@emurgo/cardano-serialization-lib-browser'
 import type { ProtocolParams } from 'src/types/network'
-import { errorMessage, randomStr, toFraction, uniqueOn_ } from 'ts-practical-fp'
-import { ada, checked_add, clamped_add, comparedBigNum, cslClone, cslMax, cslOutputValue, cslUpdateCoin, cslValueWithTokens, fromBigNum, toBigInt, toBigNum, toCSLInt, toCSLTokenExt, uint8ArrayEqual, type CSLToken, type CSLTokenExt } from 'src/csl/value'
+import { errorMessage, randomStr, sortOn_, toFraction, tuple, unionOn, uniqueOn_, upsertSortedOnWith_ } from 'ts-practical-fp'
+import { ada, checked_add, clamped_add, comparedBigNum, cslClone, cslMax, cslOutputValue, cslUpdateCoin, cslValueWithTokens, fromBigNum, toBigInt, toBigNum, toCSLInt, toCSLTokenExt, uint8ArrayEqual, type CSLToken, type CSLTokenExt, CSLAssetsExt, fromCSLAssetsExt, fromCSLInt, toCSLAssetsExt } from 'src/csl/value'
 import { calculateMinUtxoAmount } from "@stricahq/typhonjs/dist/utils/utils.js"
 import type { ExUnits } from '@cardano-ogmios/schema';
 import BigNumber from 'bignumber.js'
@@ -31,7 +31,7 @@ import { generateScriptDataHash } from '@stricahq/typhonjs/dist/utils/helpers'
 import { encodeWitnesses } from '@stricahq/typhonjs/dist/utils/encoder'
 import { typhonAdd } from 'src/typhon/math'
 import { valueCSLToTyphon } from 'src/typhon/common'
-import { addFrom, appendIterable, cslFilter, foreachIterable, fromCslIterable, mapIterable, toCslIterable } from 'src/csl/iterable'
+import { addFrom, appendIterable, cslFilter, foreachIterable, fromCslDictionary, fromCslIterable, mapIterable, toCslIterable } from 'src/csl/iterable'
 import { components } from '@blockfrost/openapi'
 import { BlockFrostAPI } from '@blockfrost/blockfrost-js'
 import { EvaluationResult } from '@cardano-ogmios/client/dist/TxSubmission/index.js'
@@ -42,6 +42,7 @@ export function makeTxBuilderCfg({protocolParams}: { protocolParams: ProtocolPar
    } else if ('max_tx_size' in protocolParams) {
       return makeTxBuilderCfgBlockfrost({protocolParams})
    }
+   throw new Error('makeTxBuilderCfg: unknown protocolParams format')
 }
 
 export function makeTxBuilderCfgGraphql({protocolParams: protocol}: {protocolParams: ProtocolParams}) {
@@ -226,86 +227,105 @@ export function setCollateral(txBuilder: TransactionBuilder, utxos: TransactionU
 // }
 
 export type MintDetails = {
-   cbor: Hex | PlutusScriptSource, // {source: PlutusScriptSource, input: TransactionInput, amount: Value},
+   source: PlutusScriptSource,
+   redeemer: PlutusData
+}
+
+export type RawMintDetails = MintDetails | {
+   cbor: Hex,
    lang: Language,
    redeemer: PlutusData
 }
 
 export const mintDetails = (
-   cbor: Hex | PlutusScriptSource, // {source: PlutusScriptSource, input: TransactionInput, amount: Value},
+   cbor: Hex,
    lang: Language,
-   redeemer: PlutusData): MintDetails =>
-   ({cbor, lang, redeemer})
+   redeemer: PlutusData) =>
+   cookMintDetails({cbor, lang, redeemer})
 
-// Adds mint tokens, doesn't reset previouly added mints
-// The following error can occur if tokens in `mints` are not sorted by policyId:
-// ===
-// ValidatorFailedError: {"error":"An error has occurred: User error:\nThe machine terminated because of an error,
-// either from a built-in function or from an explicit use of 'error'.\nCaused by:
-// [ (force (builtin headList)) (con list (data) []) ]","traces":[]}
-// ===
-// This happens because if order of tokens in `mints` argument happens to not match their order by policyId value -
-// there will be a mismatch between declared mint index and the position of corresponding mint and redeemer elements in submitted transaction
-// So we are sorting argument `mints` by policyId
-// TODO: solve the case when `setMintBuilder` is called multiple times during tx creation -
-// that means sorting needs to take already added mints into account
-export const setMintBuilder = (builder: TransactionBuilder, evaluation: EvaluationCost, mints: [CSLTokenExt | CSLTokenExt[], MintDetails][]) => {
-   // Sort by policyId to match indexes with mint redeemer order in a built transaction
-   mints.sort((a, b) => compareHex(
-      makeHex(singleton(a[0])[0].policyId.to_hex()),
-      makeHex(singleton(b[0])[0].policyId.to_hex())
-   ))
-   const mint = builder.get_mint_builder() ?? LCSL.MintBuilder.new()
-   const mintOffset = mint.get_plutus_witnesses().len() // + mint.get_native_scripts().len()
-   // const rdmrs = LCSL.Redeemers.new()
-   for (const [i, [tokens, { cbor, lang, redeemer }]] of mints.entries()) {
-      const index = mintOffset + i
-      const rdmr = cslRedeemer(evaluation, 'mint', index, redeemer)
-      for (const token of singleton(tokens)) {
-         const script = typeof cbor == 'string'
-            ? LCSL.PlutusScriptSource.new(
-               // LCSL.PlutusScript.from_bytes_with_version(fromHex(cbor), lang)
-               cslPlutusScript({cbor, lang})
-            )
-            // : cbor.ref.is_plutus_script()
-            //    ? LCSL.PlutusScriptSource.new_ref_input_with_lang_ver(
-            //       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            //       cbor.ref.plutus_script()!.hash(),
-            //       cbor.input,
-            //       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            //       cbor.ref.plutus_script()!.language_version()
-            //    )
-            //    : (() => { throw new Error('Unexpected native script') })()
-            : cbor
-         // rdmrs.add(rdmr)
-         // if ('input' in script) {
-         //    const plutusWitness = LCSL.PlutusWitness.new_with_ref(
-         //       script.source,
-         //       LCSL.DatumSource.new_ref_input(script.input),
-         //       rdmr
-         //    )
-         //    // const wtns = LCSL.PlutusWitnesses.new()
-         //    // wtns.add(LCSL.PlutusWitness.new_with_ref(script.source, LCSL.DatumSource.new_ref_input(script.input), rdmr))
-         //    // builder.add_required_plutus_input_scripts(wtns)
+export const cookMintDetails = (raw: RawMintDetails) =>
+   'cbor' in raw
+      ? ({ source: LCSL.PlutusScriptSource.new(cslPlutusScript(raw)), redeemer: raw.redeemer })
+      : raw
 
-         //    script.source = LCSL.PlutusScriptSource.new_ref_input_with_lang_ver(token.policyId, script.input, cslPlutusV2())
-         // }
-         const witness = LCSL.MintWitness.new_plutus_script(
-            script,
-            logRet('get_plutus_witnesses', rdmr, r => r.to_json())
-         )
+const mintDetailsToWitness = (evaluation: EvaluationCost, d: MintDetails) => (index: number) =>
+   LCSL.PlutusWitness.new_with_ref_without_datum(d.source, cslRedeemer(evaluation, 'mint', index, d.redeemer))
+
+// Returns plutus mints sorted by policyId
+// TODO: add handling of native script witnesses
+const unpackMintBuilder = (mintBuilder: MintBuilder) => {
+   const witnesses = fromCslIterable(mintBuilder.get_plutus_witnesses())
+   const built = mintBuilder.build()
+   const policies = sortOn_(compareHex, a => makeHex(a.to_hex()), fromCslIterable(built.keys())) // Check if keys are returned sorted or not
+   const mintAssets = policies.map(p => tuple(p, built.get_all(p)!))
+   // We assume that only one redeemer per policyId is possible, so we can accumulate MintsAssets into one MintAssets
+   return mintAssets.map(([hash, mintsAssets]) => {
+      const witness = witnesses.find(w => w.script()!.hash().to_hex() == hash.to_hex())!
+      const assets = fromCslIterable(mintsAssets).flatMap(x => fromCslDictionary(x)).map(a => ({assetName: a[0], amount: fromCSLInt(a[1])}))
+      return tuple ({policyId: hash, assets}, (i: number) => witness.clone_with_redeemer_index(toBigNum(i)))
+   })
+}
+
+const packMintBuilder = (mints: [CSLAssetsExt, (i: number) => PlutusWitness][]) => {
+   const mint = LCSL.MintBuilder.new()
+   for (const [i, [tokens, details]] of mints.entries()) {
+      const wtns = details(i)
+      for (const token of fromCSLAssetsExt(tokens)) {
+         const witness = LCSL.MintWitness.new_from_plutus_witness(wtns) // LCSL.MintWitness.new_plutus_script(source, rdmr)
          mint.set_asset(
             witness,
             token.assetName,
-            // logRet('token.assetName', LCSL.AssetName.new(fromHex(utf8ToHex('abc'))), a=>a.to_json()),
             toCSLInt(token.amount)
          )
-         console.log('witnesses_length_x', mint.get_plutus_witnesses().len(), mint.get_native_scripts().len())
-         // 
       }
    }
-   console.log('witnesses_length', mint.get_plutus_witnesses().len(), mint.get_redeeemers().len())
+   return mint
+}
+
+const prepareMintData = (evaluation: EvaluationCost) => ([a, b]: [CSLTokenExt | CSLAssetsExt, RawMintDetails]) =>
+   tuple(toCSLAssetsExt(a), mintDetailsToWitness(evaluation, cookMintDetails(b)))
+
+/**
+ * Adds mint tokens, drops previouly added mints
+ * The following error can occur if tokens in `mints` are not sorted by policyId:
+ * ===
+ * ValidatorFailedError: {"error":"An error has occurred: User error:\nThe machine terminated because of an error,
+ * either from a built-in function or from an explicit use of 'error'.\nCaused by:
+ * [ (force (builtin headList)) (con list (data) []) ]","traces":[]}
+ * ===
+ * This happens because if order of tokens in `mints` argument happens to not match their order by policyId value -
+ * there will be a mismatch between declared mint index and the position of corresponding mint and redeemer elements in submitted transaction
+ * So we are sorting argument `mints` by policyId
+ * TODO: solve the case when `setMintBuilder` is called multiple times during tx creation -
+ * that means sorting needs to take already added mints into account
+ * @param builder 
+ * @param evaluation 
+ * @param mints 
+ */
+export const setMintBuilder = (builder: TransactionBuilder, evaluation: EvaluationCost, mints: [CSLTokenExt | CSLAssetsExt, RawMintDetails][]) => {
+   // Sort by policyId to match indexes with mint redeemer order in a built transaction
+   sortOn_(compareHex, a => makeHex(a[0].policyId.to_hex()), mints)
+   const mints_ = mints.map(prepareMintData(evaluation))
+   const mint = packMintBuilder(mints_)
    builder.set_mint_builder(mint)
+}
+
+const combineMints = (next: [CSLAssetsExt, (i: number) => PlutusWitness], old: [CSLAssetsExt, (i: number) => PlutusWitness]) => {
+   next[1](0).free() // Free unneeded memory
+   const assets = unionOn(a => a.assetName.to_hex(), (next, old) => ({ assetName: old.assetName, amount: next.amount /*.plus(old.amount)*/ }),
+      next[0].assets, old[0].assets)
+   return tuple({policyId: old[0].policyId, assets}, old[1])
+}
+
+// Add mints to the builder in the order of their policyId, accounting for previously added mints
+// Overwrites quantity of previously added mints
+export const updateMintBuilder = (builder: TransactionBuilder, evaluation: EvaluationCost, mints: [CSLTokenExt | CSLAssetsExt, RawMintDetails][]) => {
+   const mintBuilder = builder.get_mint_builder() ?? LCSL.MintBuilder.new()
+   // `unpacked` is sorted by policyId to match indexes with mint redeemer order in a built transaction
+   const unpacked = unpackMintBuilder(mintBuilder)
+   const mints_ = mints.map(prepareMintData(evaluation))
+   const newMints = upsertSortedOnWith_(compareHex, a => makeHex(a[0].policyId.to_hex()), combineMints, mints_, unpacked)
+   builder.set_mint_builder(packMintBuilder(newMints))
 }
 
 export const logRet = <T>(str: string, t: T, f: (arg0: T) => string) => (console.log(str, f(t)), t)
@@ -339,7 +359,7 @@ export const mintInlineScript = (
    builder: TransactionBuilder,
    evaluation: EvaluationCost,
    holder: {cbor: Hex, hash: Hex},
-   witnessMint: Token & MintDetails, //{cbor: Hex, policyId: Hex, assetName: Hex, lang: Language, redeemer: PlutusData, amount: BigNumber},
+   witnessMint: Token & RawMintDetails, //{cbor: Hex, policyId: Hex, assetName: Hex, lang: Language, redeemer: PlutusData, amount: BigNumber},
    inline: CompiledScript | CompiledPolicy ) => { // {cbor: Hex, /* hash: Hex,*/ lang: Language}) => {
    const witnessToken = tokenTyphonToCSL(witnessMint)
    const mkHolderUTxO = (minAda: BigNum) => {
@@ -356,7 +376,7 @@ export const mintInlineScript = (
    // if (!minAda) return null
    const {minAda} = requireAddOutput(ctx, builder, mkHolderUTxO)
    console.log('mintInlineScript out set', minAda.to_str())
-   setMintBuilder(builder, evaluation, [
+   updateMintBuilder(builder, evaluation, [
       [ toCSLTokenExt(witnessToken), witnessMint ]
    ])
    return minAda

@@ -1,4 +1,4 @@
-import type { AssetName, ScriptHash, BigNum, Value, TransactionOutput, TransactionUnspentOutput, Address, MultiAsset } from '@emurgo/cardano-serialization-lib-browser'
+import type { AssetName, ScriptHash, BigNum, Value, TransactionOutput, TransactionUnspentOutput, Address, MultiAsset, Int } from '@emurgo/cardano-serialization-lib-browser'
 // import CSL from '@emurgo/cardano-serialization-lib-browser'
 // import { Loader } from 'cardano-buoy'
 import { fromHex, makeHex, toHex } from 'ts-binary-newtypes'
@@ -16,6 +16,7 @@ export const toBigNum = (n: number | BigNumber | string) =>
       :                        n.toFixed())
 export const fromBigNum = (n: BigNum) => new BigNumber(n.to_str())
 export const toCSLInt = (amount: BigNumber) => amount.gte(0) ? LCSL.Int.new(toBigNum(amount)) : LCSL.Int.new_negative(toBigNum(amount.negated()))
+export const fromCSLInt = (int: Int) => new BigNumber(int.to_str())
 export const copyBigNum = (b: BigNum) => cslClone(LCSL.BigNum, b)
 export const cslClone = <T extends {to_bytes: () => Uint8Array} | undefined, C extends {from_bytes: (bytes: Uint8Array) => T}>(c: C, v: T) =>
    v ? c.from_bytes(v.to_bytes()) : undefined as T
@@ -38,7 +39,15 @@ export type CSLAssets = [ScriptHash, [AssetName, BigNum][]]
 export type CSLTokenClass = {policyId: ScriptHash, assetName: AssetName}
 export type CSLToken = {policyId: ScriptHash, assetName: AssetName, amount: BigNum}
 export type CSLTokenExt = {policyId: ScriptHash, assetName: AssetName, amount: BigNumber}
+export type CSLAssetExt = {assetName: AssetName, amount: BigNumber}
+export type CSLAssetsExt = {policyId: ScriptHash, assets: CSLAssetExt[]}
 export const toCSLTokenExt = (t: CSLToken): CSLTokenExt => ({...t, amount: fromBigNum(t.amount)})
+export const fromCSLAssetsExt = (t: CSLTokenExt | CSLAssetsExt) => 'assets' in t
+   ? t.assets.map(a => ({policyId: t.policyId, ...a}))
+   : [t]
+export const toCSLAssetsExt = (t: CSLTokenExt | CSLAssetsExt) => 'assets' in t
+   ? t
+   : { policyId: t.policyId, assets: [{ assetName: t.assetName, amount: t.amount }] }
 
 // =================================================================
 

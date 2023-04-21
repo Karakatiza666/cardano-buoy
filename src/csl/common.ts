@@ -1,6 +1,6 @@
 // import CSL from '@emurgo/cardano-serialization-lib-browser'
 // import { Loader } from 'cardano-buoy'
-import type { Address, DatumSource, Language, PlutusData, PlutusScriptSource, TransactionInput, TransactionUnspentOutput, Value } from "@emurgo/cardano-serialization-lib-browser"
+import type { Address, BigNum, DatumSource, Language, PlutusData, PlutusScriptSource, TransactionInput, TransactionUnspentOutput, Value } from "@emurgo/cardano-serialization-lib-browser"
 import { HashType, type ExUnits, type Input, type NetworkId, type ShelleyAddress } from "@stricahq/typhonjs/dist/types.js"
 import type Typhon from "@stricahq/typhonjs/dist/types.js"
 import { fromHex, makeHex, numToHex, type Hex } from "ts-binary-newtypes"
@@ -13,6 +13,7 @@ import { BaseAddress, EnterpriseAddress, PointerAddress } from "@stricahq/typhon
 import * as vlq from 'vlq'
 import { toBase64 } from "ts-binary-newtypes"
 import type { EvaluationCost, EvaluationTag } from "src/types/evaluation"
+import { tuple } from "ts-practical-fp"
 
 export type DetailedPlutusMetadataJson = {
    string: string
@@ -222,7 +223,7 @@ const cslRedeemerTag = (tag: EvaluationTag) =>
 export const cslRedeemer = (evaluation: EvaluationCost, tag: EvaluationTag, index: number, redeemer: PlutusData) =>
    LCSL.Redeemer.new(
       cslRedeemerTag(tag),
-      toBigNum(index),
+      typeof index == 'number' ? toBigNum(index) : index,
       redeemer,
       cslExUnits(evaluation(tag, index))
    )
@@ -250,3 +251,5 @@ export type PlutusPolicy = {
 }
 
 export const cslPlutusScript = (script: {cbor: Hex, lang: Language}) => LCSL.PlutusScript.from_hex_with_version(script.cbor, script.lang)
+
+export const cslPlutusSource = (cbor: Hex, lang: Language) => LCSL.PlutusScriptSource.new(cslPlutusScript({cbor, lang}))
