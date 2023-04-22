@@ -19,6 +19,7 @@
     "@emurgo/cip14-js": "^3.0.1",
     "@stricahq/typhonjs": "^1.2.8",
     "@types/lockr": "^0.8.8",
+    "bip39": "^3.1.0",
     "cheerio": "^1.0.0-rc.12",
     "deepmerge-ts": "^4.3.0",
     "fp-ts": "^2.13.1",
