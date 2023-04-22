@@ -1,7 +1,7 @@
 
 // import CSL from '@emurgo/cardano-serialization-lib-browser'
 // import { Loader } from 'cardano-buoy'
-import type { BigNum, TransactionUnspentOutput, Transaction, AssetName, ScriptHash, TransactionBuilder, TransactionOutput, TransactionInput, Address, Value, Language, PlutusData, ExUnits as CSLExUnits, ScriptRef, PlutusScriptSource, PlutusScript, Redeemer, TransactionWitnessSet, Costmdls, PlutusWitnesses, PlutusWitness, Redeemers, PlutusList, TransactionHash, Ed25519KeyHash, Vkeywitness, MintBuilder, MintsAssets } from '@emurgo/cardano-serialization-lib-browser'
+import type { BigNum, TransactionUnspentOutput, Transaction, AssetName, ScriptHash, TransactionBuilder, TransactionOutput, TransactionInput, Address, Value, Language, PlutusData, ExUnits as CSLExUnits, ScriptRef, PlutusScriptSource, PlutusScript, Redeemer, TransactionWitnessSet, Costmdls, PlutusWitnesses, PlutusWitness, Redeemers, PlutusList, TransactionHash, Ed25519KeyHash, Vkeywitness, MintBuilder, MintsAssets, PrivateKey, TransactionBody } from '@emurgo/cardano-serialization-lib-browser'
 import type { ProtocolParams } from 'src/types/network'
 import { errorMessage, randomStr, sortOn_, toFraction, tuple, unionOn, uniqueOn_, upsertSortedOnWith_ } from 'ts-practical-fp'
 import { ada, checked_add, clamped_add, comparedBigNum, cslClone, cslMax, cslOutputValue, cslUpdateCoin, cslValueWithTokens, fromBigNum, toBigInt, toBigNum, toCSLInt, toCSLTokenExt, uint8ArrayEqual, type CSLToken, type CSLTokenExt, CSLAssetsExt, fromCSLAssetsExt, fromCSLInt, toCSLAssetsExt } from 'src/csl/value'
@@ -729,7 +729,7 @@ const processReal = (
    costmdls: Costmdls) =>
    async (result: BuilderResult) => {
    const tx = buildResult(costmdls)(result)
-   return signTx(api, tx)
+   return signTxCIP30(api, tx)
 }
 
 const simpleTxIteration = (
@@ -843,7 +843,7 @@ export const runStrategies = async (
 
    if (!result) throw new Error('Couldn\'t find UTxO suitable for transaction!')
    if (result instanceof Error) throw result
-   // const signed = await signTx(api, result)
+   // const signed = await signTxCIP30(api, result)
    console.log('FINAL tx', result.to_json())
    const doSubmit = (tx: Transaction) => api.submitTx(toHexed(tx))
    let submit = doSubmit(result);
@@ -866,7 +866,7 @@ export const runStrategies = async (
          }
          const newBody = result.body()
          newBody.set_script_data_hash(LCSL.ScriptDataHash.from_hex(validHash))
-         return signTx(api, LCSL.Transaction.new(newBody, result.witness_set(), result.auxiliary_data()))
+         return signTxCIP30(api, LCSL.Transaction.new(newBody, result.witness_set(), result.auxiliary_data()))
       }).then(next => typeof next == 'string' ? next :
          api.submitTx(toHexed(next))
       )
@@ -954,7 +954,13 @@ const getExpectedWalletSignatures = (pagination: () => () => Promise<Transaction
    )
 }
 
-export async function signTx(wallet: WalletCIP30ApiInstance, tx: Transaction) {
+/**
+ * Sign with wallet
+ * @param wallet 
+ * @param tx 
+ * @returns 
+ */
+export async function signTxCIP30(wallet: WalletCIP30ApiInstance, tx: Transaction) {
    const witnessSet = tx.witness_set()
    const txVkeyWitnessSet = fromHexed(LCSL.TransactionWitnessSet)
       (await wallet.signTx(toHexed(tx), true)
@@ -972,7 +978,14 @@ export async function signTx(wallet: WalletCIP30ApiInstance, tx: Transaction) {
    return signedTx
 }
 
-export async function signTxExpected(wallet: WalletCIP30ApiInstance, tx: Transaction, expected: Ed25519KeyHash[]) {
+/**
+ * Sign with wallet, only keep expected signatures
+ * @param wallet 
+ * @param tx 
+ * @param expected 
+ * @returns 
+ */
+export async function signTxCIP30Expected(wallet: WalletCIP30ApiInstance, tx: Transaction, expected: Ed25519KeyHash[]) {
    const witnessSet = tx.witness_set()
    const txVkeyWitnessSet = fromHexed(LCSL.TransactionWitnessSet)
       (await wallet.signTx(toHexed(tx), true)
@@ -1014,3 +1027,37 @@ export const cslEvalTxBlockfrost = (ctx: {blockfrostApi: BlockFrostAPI}) => asyn
 }
 
 // ========= =========
+
+/**
+ * Sign transaction with every passed private key
+ * @param pkey 
+ * @returns 
+ */
+export const signTxEverySecret = (pkeys: PrivateKey[], txBody: TransactionBody) => {
+   const txHash = LCSL.hash_transaction(txBody)
+   const vkey = pkeys.map(pkey => LCSL.make_vkey_witness(txHash, pkey))
+   return vkey
+   // const vkeyWitnesses = LCSL.Vkeywitnesses.new()
+   // vkeyWitnesses.add(vkey)
+   // const txWitnessSet = LCSL.TransactionWitnessSet.new()
+   // txWitnessSet.set_vkeys(vkeyWitnesses)
+   // return txWitnessSet
+}
+
+// const signTxWithSecret = (pkey: PrivateKey) => (transaction: Transaction) => {
+//    transaction.
+//    const txHash = transaction.getTransactionHash()
+//    // console.log('signTyphonTx')
+//    // console.log(owner.publicKey.to_bech32('addr_test1'))
+//    // const pubKey = owner.paymentKeyPub.as_bytes()
+//    const pubKey = owner.paymentKey.to_public().as_bytes()
+//    const witness = {
+//      publicKey: Buffer.from(pubKey),
+//      //signature: Buffer.from(Cardano.PrivateKey.from_normal_bytes(owner.paymentKey).sign(txHash).to_bytes())
+//      signature: Buffer.from(owner.paymentKey.sign(txHash).to_bytes())
+//    }
+//    // console.log(decodeBech32('ed25519_pk1887nuwka2ktvhm7yw949t360jprac5rw7ww093l7eh7t4hgr46csknv69f').value)
+//    // console.log(toHex(witness.publicKey))
+//    transaction.addWitness(witness)
+//    // console.log('/signTyphonTx')
+//  }
