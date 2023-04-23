@@ -1,7 +1,7 @@
 import { singleton } from "ts-practical-fp"
 import { mnemonicToEntropy } from 'bip39'
 import { Bip32PrivateKey, PrivateKey } from "@emurgo/cardano-serialization-lib-browser"
-
+// https://forum.cardano.org/t/using-emurgo-cardano-serialization-lib-nodejs-for-creating-and-signing-transaction/88864
 export const seedPrivateKey = (seed: string | string[]) => {
    const mnemonic = Array.isArray(seed) ? seed : Array.from(seed.match(/\w+/)?.values() ?? [])
    const entropy = mnemonicToEntropy(mnemonic.join(' '))

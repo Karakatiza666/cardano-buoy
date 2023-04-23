@@ -3,7 +3,7 @@
 // import { Loader } from 'cardano-buoy'
 import type { BigNum, TransactionUnspentOutput, Transaction, AssetName, ScriptHash, TransactionBuilder, TransactionOutput, TransactionInput, Address, Value, Language, PlutusData, ExUnits as CSLExUnits, ScriptRef, PlutusScriptSource, PlutusScript, Redeemer, TransactionWitnessSet, Costmdls, PlutusWitnesses, PlutusWitness, Redeemers, PlutusList, TransactionHash, Ed25519KeyHash, Vkeywitness, MintBuilder, MintsAssets, PrivateKey, TransactionBody } from '@emurgo/cardano-serialization-lib-browser'
 import type { ProtocolParams } from 'src/types/network'
-import { errorMessage, randomStr, sortOn_, toFraction, tuple, unionOn, uniqueOn_, upsertSortedOnWith_ } from 'ts-practical-fp'
+import { errorMessage, randomStr, sortOn_, toFraction, tuple, unionOn, uniqueOn_, upsertSortedOnWith_, zip } from 'ts-practical-fp'
 import { ada, checked_add, clamped_add, comparedBigNum, cslClone, cslMax, cslOutputValue, cslUpdateCoin, cslValueWithTokens, fromBigNum, toBigInt, toBigNum, toCSLInt, toCSLTokenExt, uint8ArrayEqual, type CSLToken, type CSLTokenExt, CSLAssetsExt, fromCSLAssetsExt, fromCSLInt, toCSLAssetsExt } from 'src/csl/value'
 import { calculateMinUtxoAmount } from "@stricahq/typhonjs/dist/utils/utils.js"
 import type { ExUnits } from '@cardano-ogmios/schema';
@@ -359,13 +359,13 @@ export const mintInlineScript = (
    builder: TransactionBuilder,
    evaluation: EvaluationCost,
    holder: {cbor: Hex, hash: Hex},
-   witnessMint: Token & RawMintDetails, //{cbor: Hex, policyId: Hex, assetName: Hex, lang: Language, redeemer: PlutusData, amount: BigNumber},
+   witnessMints: (Token & RawMintDetails)[], //{cbor: Hex, policyId: Hex, assetName: Hex, lang: Language, redeemer: PlutusData, amount: BigNumber},
    inline: CompiledScript | CompiledPolicy ) => { // {cbor: Hex, /* hash: Hex,*/ lang: Language}) => {
-   const witnessToken = tokenTyphonToCSL(witnessMint)
+   const witnessTokens = witnessMints.map(tokenTyphonToCSL)
    const mkHolderUTxO = (minAda: BigNum) => {
       const {value} = cslValueWithTokens(
          LCSL.Value.new(minAda),
-         [ witnessToken ]
+         witnessTokens
       )
       const utxo = LCSL.TransactionOutput.new(cslScriptEnterpriseAddr(ctx, holder.hash), value)
       utxo.set_script_ref(LCSL.ScriptRef.new_plutus_script(cslPlutusScript(inline)))
@@ -376,9 +376,9 @@ export const mintInlineScript = (
    // if (!minAda) return null
    const {minAda} = requireAddOutput(ctx, builder, mkHolderUTxO)
    console.log('mintInlineScript out set', minAda.to_str())
-   updateMintBuilder(builder, evaluation, [
-      [ toCSLTokenExt(witnessToken), witnessMint ]
-   ])
+   updateMintBuilder(builder, evaluation,
+      zip(witnessTokens.map(toCSLTokenExt), witnessMints)
+   )
    return minAda
 }
 
