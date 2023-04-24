@@ -691,9 +691,8 @@ export const simpleTx = (simple: SimpleTxStrategy['simple']) => ({simple})
 export type ComplexTxStrategy = {complex: <Result>(
    evaluation: EvaluationCost,
    constraints: CSLPipeTxConstraints,
-   inputPicker: PickRecursiveIgnore<TransactionUnspentOutput, Result | Error>,
-   complete: (builder: BuilderResult) => Result | null | Promise<Result | null>
-) => Promise<Result | Error | null>}
+   inputPicker: PickRecursiveIgnore<TransactionUnspentOutput, BuilderResult | Error>
+) => Promise<BuilderResult | Error | null>}
 
 export const complexTx = (complex: ComplexTxStrategy['complex']) => ({complex})
 
@@ -730,6 +729,12 @@ const processReal = (
    async (result: BuilderResult) => {
    const tx = buildResult(costmdls)(result)
    return signTxCIP30(api, tx)
+}
+
+const processResult = <T>(f: (result: BuilderResult) => T | null | Promise<T | null>) =>
+async (result: BuilderResult | Error | null) => {
+   if (!isValidResult(result)) return result
+   return f(result)
 }
 
 const simpleTxIteration = (
@@ -793,18 +798,16 @@ const tryComplexTxStrategy = async (
    const evaluated = await strategy.complex(
       dummyEval,
       constraintsWithFee(constraints, dummyFee),
-      pickRecursiveIgnore(pagination, utxoKey),
-      processDummy(ctx, costmdls, getSignatures)
-   )
+      pickRecursiveIgnore(pagination, utxoKey)
+   ).then(processResult(processDummy(ctx, costmdls, getSignatures)))
    console.log('tryComplexTxStrategy dummy done')
    if (!isValidResult(evaluated)) return evaluated
    // TODO: work on case when dummy TX is successful but completed tx is not
    const real = await strategy.complex(
       evaluated.cost,
       constraintsWithFee(constraints, evaluated.fee),
-      pickRecursiveIgnore(pagination, utxoKey),
-      processReal(api, costmdls)
-   )
+      pickRecursiveIgnore(pagination, utxoKey)
+   ).then(processResult(processReal(api, costmdls)))
    console.log('tryComplexTxStrategy real done')
    return real
 }
