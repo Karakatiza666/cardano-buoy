@@ -1,6 +1,6 @@
 // import CSL from '@emurgo/cardano-serialization-lib-browser'
 // import { Loader } from 'cardano-buoy'
-import type { Address, BigNum, DatumSource, Language, PlutusData, PlutusScriptSource, TransactionInput, TransactionUnspentOutput, Value } from "@emurgo/cardano-serialization-lib-browser"
+import type { Address, BigNum, DatumSource, Language, PlutusData, PlutusScriptSource, ScriptHash, TransactionInput, TransactionUnspentOutput, Value } from "@emurgo/cardano-serialization-lib-browser"
 import { HashType, type ExUnits, type Input, type NetworkId, type ShelleyAddress } from "@stricahq/typhonjs/dist/types.js"
 import type Typhon from "@stricahq/typhonjs/dist/types.js"
 import { fromHex, makeHex, numToHex, type Hex } from "ts-binary-newtypes"
@@ -92,7 +92,7 @@ export type UTxODatumInfoPlain = {
    | null
 }
 
-export type UTxODatumInfoCSL = {
+export type UTxOExtraCSL = {
    // scriptRef?: PlutusScriptSource
    // datum?: {
    //    source: DatumSource
@@ -101,7 +101,10 @@ export type UTxODatumInfoCSL = {
    //       [k: string]: unknown;
    //    }
    // } & ({hash: Hex} | {ref: TransactionInput})
-   scriptRef?: PlutusScriptSource
+   script?: {
+      hash: ScriptHash,
+      ref: PlutusScriptSource
+   }
    datum?: {
       hash: Hex
       source: DatumSource
@@ -121,7 +124,7 @@ export type UTxODatumInfoCSL = {
    }
 } // & OptionalIntersection<{datumHash: DatumSource} | {datumRef: DatumSource}>
 
-export type TransactionUnspentOutputExt = TransactionUnspentOutput & UTxODatumInfoCSL 
+export type TransactionUnspentOutputExt = TransactionUnspentOutput & UTxOExtraCSL 
 
 export const requireExtDatumSource = (o: TransactionUnspentOutputExt) =>
    o.datum?.source ?? (() => { throw new Error('Datum source is required') })()
