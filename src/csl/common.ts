@@ -253,3 +253,9 @@ export type PlutusPolicy = {
 export const cslPlutusScript = (script: {cbor: Hex, lang: Language}) => LCSL.PlutusScript.from_hex_with_version(script.cbor, script.lang)
 
 export const cslPlutusSource = (cbor: Hex, lang: Language) => LCSL.PlutusScriptSource.new(cslPlutusScript({cbor, lang}))
+export const cslPlutusSourceRef = (input: TransactionInput, hash: Hex, lang: Language) =>
+   LCSL.PlutusScriptSource.new_ref_input_with_lang_ver(
+      LCSL.ScriptHash.from_hex(hash),
+      input,
+      lang
+   )

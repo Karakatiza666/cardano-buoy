@@ -1,6 +1,6 @@
 import { createStateQueryClient } from "@cardano-ogmios/client"
 import { makeOgmiosContext, ogmiosFetchDatum } from "src/utils/ogmios"
-import { DetailedPlutusDataJson, gqlLanguage, PlutusLangVer, TransactionUnspentOutputExt, UTxODatumInfoPlain, UtxoGQLToCSLParam, valueTyphonToCSL } from "./common"
+import { cslPlutusSourceRef, DetailedPlutusDataJson, gqlLanguage, PlutusLangVer, TransactionUnspentOutputExt, UTxODatumInfoPlain, UtxoGQLToCSLParam, valueTyphonToCSL } from "src/csl/common"
 import type { Hex } from 'ts-binary-newtypes'
 import { nonNull } from "ts-practical-fp"
 import type { BlockFrostAPI } from '@blockfrost/blockfrost-js'
@@ -25,11 +25,9 @@ export const utxoGQLToCSL = (params?: UtxoGQLToCSLParam) => (o: GQLUTxOWithDatum
    const utxo: TransactionUnspentOutputExt = LCSL.TransactionUnspentOutput.new(input, output)
    console.log('utxoGQLToCSL', o)
    if (o.script) {
-      utxo.scriptRef = LCSL.PlutusScriptSource.new_ref_input_with_lang_ver(
-         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-         LCSL.ScriptHash.from_hex(o.script.hash),
+      utxo.scriptRef = cslPlutusSourceRef(
          input,
-         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+         o.script.hash,
          gqlLanguage(o.script.type)
       )
       console.log('utxoGQLToCSL', o.script.hash, input.transaction_id().to_hex(), gqlLanguage(o.script.type).to_json())
@@ -160,9 +158,9 @@ const utxoBlockfrostToCSL = (expectedScriptLang?: PlutusLangVer) => (
       if (!expectedScriptLang) {
          throw new Error(`utxoBlockfrostToCSL: got reference_script_hash ${_utxo.reference_script_hash}, but expectedScriptLang not specified`)
       }
-      utxo.scriptRef = LCSL.PlutusScriptSource.new_ref_input_with_lang_ver(
-         LCSL.ScriptHash.from_hex(_utxo.reference_script_hash),
+      utxo.scriptRef = cslPlutusSourceRef(
          input,
+         makeHex(_utxo.reference_script_hash),
          gqlLanguage(expectedScriptLang)
       )
       console.log('utxoBlockfrostToCSL', _utxo.reference_script_hash, input.transaction_id().to_hex(), gqlLanguage(expectedScriptLang).to_json())
