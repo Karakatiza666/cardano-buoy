@@ -589,7 +589,12 @@ const hashScriptData = (redeemers: Redeemers, cost_models: Costmdls, datums?: Pl
 }
 
 // Positive value to be subtracted from wallet
-export function pickAnotherInputFor<Result>(ctx: { protocolParams: ProtocolParams }, builder: TransactionBuilder, delta: TyphonValue, finishTx: (inputPicker: PickRecursiveIgnore<TransactionUnspentOutput, Result | Error>) => Promise<Result | Error | null>): PickRecursiveIgnore_<TransactionUnspentOutput, Result | Error> {
+export function pickAnotherInputFor<Result>(
+   ctx: { protocolParams: ProtocolParams },
+   builder: TransactionBuilder,
+   delta: TyphonValue,
+   finishTx: (inputPicker: PickRecursiveIgnore<TransactionUnspentOutput, Result | Error>) => Promise<Result | Error | null>
+): PickRecursiveIgnore_<TransactionUnspentOutput, Result | Error> {
    return async (input, inputPicker) => {
       const mkUTxO = () => {
          const value = valueTyphonToCSL(typhonAdd(valueCSLToTyphon(cslOutputValue(input)), delta))

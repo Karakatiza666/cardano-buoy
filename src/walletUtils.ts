@@ -24,7 +24,7 @@ export const fetchConnectors = <Candidate, T>(ws: [string, Candidate][], extract
 }
 
 export function fetchConnector<Candidate, T>(w: Record<string, Candidate> | undefined, extractors: ((c: [string, Candidate]) => T | null)[], wallet: string) {
-   return callNonNull(c => firstNonNull(apply(tuple(wallet, c)))(extractors), w?.[wallet])
+   return callNonNull((c: Candidate) => firstNonNull(apply(tuple(wallet, c)))(extractors))(w?.[wallet])
 }
 
 const knownConnectorIcons = {
