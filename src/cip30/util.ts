@@ -36,8 +36,7 @@ export const fetchCollateral = async (api: WalletCIP30ApiInstance, lovelace: str
       })
 }
 
-
-export const fetchAllWalletUTxOs = 
+export const fetchAllWalletUTxOs_ = 
    (wallet: WalletCIP30ApiInstance, policyId?: Hex | Hex[], assetName?: Hex | Hex[]) =>
    paginatedLookupAll({
       pageSize: 50, startPage: 0,
@@ -59,7 +58,7 @@ export const fetchAllWalletUTxOs =
       }
    })
 
-export const fetchAllWalletUTxOs_ = 
+export const fetchAllWalletUTxOs = 
    (wallet: WalletCIP30ApiInstance, tcl?: TokenClass | TokenClass[]) =>
    paginatedLookupAll({
       pageSize: 50, startPage: 0,
@@ -72,6 +71,13 @@ export const fetchAllWalletUTxOs_ =
             .find(tcl => !cslValueToken(aclTyphonToCSL(tcl), amount).is_zero())
       }
    })
+
+export const getWalletUTxOPage = (api: WalletCIP30ApiInstance) => (params: {pageSize: number, page: number}) => api
+   // TODO: give the option to specify minimum value for UTxOs:
+   // .getUtxos(toHexed(LCSL.Value.new(ada(minExpectedAda)), v => v.to_bytes()), {...params, limit})
+   .getUtxos(undefined, {page: params.page, limit: params.pageSize})
+   .then(mapFromHexed(LCSL.TransactionUnspentOutput))
+   // .then(us => ((us ?? []).forEach(u => console.log('getUTxOPage', u.to_json())), us))
 
 export const enablePatchCIP30 = async (api: WalletCIP30Api & { key: string }) => {
    let instance = await api.enable()

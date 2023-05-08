@@ -1,7 +1,7 @@
 
 // import CSL from '@emurgo/cardano-serialization-lib-browser'
 // import { Loader } from 'cardano-buoy'
-import type { BigNum, TransactionUnspentOutput, Transaction, AssetName, ScriptHash, TransactionBuilder, TransactionOutput, TransactionInput, Address, Value, Language, PlutusData, ExUnits as CSLExUnits, ScriptRef, PlutusScriptSource, PlutusScript, Redeemer, TransactionWitnessSet, Costmdls, PlutusWitnesses, PlutusWitness, Redeemers, PlutusList, TransactionHash, Ed25519KeyHash, Vkeywitness, MintBuilder, MintsAssets, PrivateKey, TransactionBody } from '@emurgo/cardano-serialization-lib-browser'
+import type { BigNum, TransactionUnspentOutput, Transaction, AssetName, ScriptHash, TransactionBuilder, TransactionOutput, TransactionInput, Address, Value, Language, PlutusData, ExUnits as CSLExUnits, ScriptRef, PlutusScriptSource, PlutusScript, Redeemer, TransactionWitnessSet, Costmdls, PlutusWitnesses, PlutusWitness, Redeemers, PlutusList, TransactionHash, Ed25519KeyHash, Vkeywitness, MintBuilder, MintsAssets, PrivateKey, TransactionBody, Vkeywitnesses } from '@emurgo/cardano-serialization-lib-browser'
 import type { ProtocolParams } from 'src/types/network'
 import { errorMessage, randomStr, sortOn_, toFraction, tuple, unionOn, uniqueOn_, upsertSortedOnWith_, zip } from 'ts-practical-fp'
 import { ada, checked_add, clamped_add, comparedBigNum, cslClone, cslMax, cslOutputValue, cslUpdateCoin, cslValueWithTokens, fromBigNum, toBigInt, toBigNum, toCSLInt, toCSLTokenExt, uint8ArrayEqual, type CSLToken, type CSLTokenExt, CSLAssetsExt, fromCSLAssetsExt, fromCSLInt, toCSLAssetsExt } from 'src/csl/value'
@@ -10,7 +10,7 @@ import type { ExUnits } from '@cardano-ogmios/schema';
 import BigNumber from 'bignumber.js'
 import { makeOgmiosContext } from 'src/utils/ogmios'
 import { createTxSubmissionClient } from '@cardano-ogmios/client'
-import { compareHex, fromHex, makeHex, numToHex, utf8ToHex, toHex, type Hex } from 'ts-binary-newtypes'
+import { compareHex, fromHex, makeHex, numToHex, utf8ToHex, toHex, type Hex, unsafeHexed } from 'ts-binary-newtypes'
 import { dummyEval, evaluated } from 'src/utils/evaluation'
 import type { WalletCIP30ApiInstance } from 'src/cip30/api'
 import { mapFromHexed, toHexed, fromHexed } from 'ts-binary-newtypes'
@@ -91,7 +91,7 @@ export function makeTxBuilderCfgBlockfrost({protocolParams: protocol}: {protocol
       .build()
 }
 
-export type CSLPipeTxConstraints = {
+export type TxConstraints = {
    amount: BigNumber // amount added to output, can be negative
    fee: BigNum
 }
@@ -99,7 +99,7 @@ export type CSLPipeTxConstraints = {
 export const noConstraints = () => ({amount: new BigNumber(0), fee: toBigNum(0)})
 
 // Fee is positive, it is subtracted from amount in constraints
-export const constraintsWithFee = (c: CSLPipeTxConstraints, fee: BigNum) => {
+export const constraintsWithFee = (c: TxConstraints, fee: BigNum) => {
    console.log('in constraintsWithFee')
    const amount = c.amount.minus(fromBigNum(fee))
    console.log('out constraintsWithFee', amount.toString())
@@ -111,8 +111,8 @@ export const constraintsWithFee = (c: CSLPipeTxConstraints, fee: BigNum) => {
 // Used to set fee for transaction with single input and single output
 // export const tryMakePipeTxCSL = (
 //    pp: ProtocolParams,
-//    makeTx: (input: TransactionUnspentOutput, constraints: CSLPipeTxConstraints) => Promise<TransactionBuilder | null>,
-//    constraints: CSLPipeTxConstraints, feeOffset = toBigNum(0)) =>
+//    makeTx: (input: TransactionUnspentOutput, constraints: TxConstraints) => Promise<TransactionBuilder | null>,
+//    constraints: TxConstraints, feeOffset = toBigNum(0)) =>
 //    async (it: TransactionUnspentOutput): Promise<LCSL.TransactionBuilder | null> => {
 //    const res1 = await makeTx(it, constraints)
 //    // This is a pipe tx - a single output is expected
@@ -652,31 +652,6 @@ const processScriptDataHash = (costmdls: Costmdls, result: BuilderResult) => {
    }
 }
 
-const jsonToCostModel = (numbers: number[]) => {
-   const mdl = LCSL.CostModel.new()
-   numbers.forEach((num, i) => mdl.set(i, LCSL.Int.new_i32(num)))
-   return mdl
-}
-
-const fetchCostmdls = (ctx: {protocolParams: ProtocolParams}) => {
-   const costmdls = LCSL.Costmdls.new()
-   costmdls.insert(LCSL.Language.new_plutus_v2(), jsonToCostModel(ctx.protocolParams.costModel.PlutusV2))
-   // return LCSL.TxBuilderConstants.plutus_vasil_cost_models()
-   return costmdls
-}
-
-const completeDummy = async (
-   ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
-   dummyTx: Transaction, expectedSignatures: Ed25519KeyHash[]) =>  {
-   const signedDummyTx = await dummySignTx(dummyTx, expectedSignatures)
-   console.log('dummy tx', signedDummyTx.to_json())
-   // const { rawEval, cost } = await cslEvalTxOgmios(ctx)(signedDummyTx)
-   const { rawEval, cost } = await cslEvalTxBlockfrost(ctx)(signedDummyTx)
-   const { totalExUnits, additionalFee } = evaluationTotalAndFee(ctx.protocolParams, rawEval)
-   const fee = cslCalculateFee(ctx.protocolParams, signedDummyTx, totalExUnits).checked_add(additionalFee)
-   return { cost, fee }
-}
-
 const buildResult = (costmdls: Costmdls) => (result: BuilderResult) => {
    processScriptDataHash(costmdls, result)
    return 'builder' in result
@@ -687,7 +662,7 @@ const buildResult = (costmdls: Costmdls) => (result: BuilderResult) => {
 
 export type SimpleTxStrategy = {simple: (
    evaluation: EvaluationCost,
-   constraints: CSLPipeTxConstraints,
+   constraints: TxConstraints,
    input: TransactionUnspentOutput
 ) => Promise<BuilderResult | Error | null>}
 
@@ -695,7 +670,7 @@ export const simpleTx = (simple: SimpleTxStrategy['simple']) => ({simple})
 
 export type ComplexTxStrategy = {complex: <Result>(
    evaluation: EvaluationCost,
-   constraints: CSLPipeTxConstraints,
+   constraints: TxConstraints,
    inputPicker: PickRecursiveIgnore<TransactionUnspentOutput, BuilderResult | Error>
 ) => Promise<BuilderResult | Error | null>}
 
@@ -709,14 +684,19 @@ const isValidResult = <R>(r: R | Error | null): r is R => nonNull(r) && !(r inst
 //    return r !== null;
 // };
 
-// const processSimpleResult = (
-//    ctx: {ogmiosEndpoint: string, protocolParams: ProtocolParams},
-//    api: WalletCIP30ApiInstance,
-//    cost: EvaluationCost,
-//    fee: BigNum,
-//    func: ) => async (input: TransactionUnspentOutput) => {
-   
-// }
+type TxSigner = (tx: Transaction) => Promise<Vkeywitnesses | undefined>
+type UnsignedTransaction = (signer: TxSigner) => Promise<Transaction>
+
+const evaluateTx = async (
+   ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
+   signedTx: Transaction) => {
+   console.log('dummy tx', signedTx.to_json())
+   // const { rawEval, cost } = await cslEvalTxOgmios(ctx)(signedTx)
+   const { rawEval, cost } = await cslEvalTxBlockfrost(ctx)(signedTx)
+   const { totalExUnits, additionalFee } = evaluationTotalAndFee(ctx.protocolParams, rawEval)
+   const fee = cslCalculateFee(ctx.protocolParams, signedTx, totalExUnits).checked_add(additionalFee)
+   return { cost, fee }
+}
 
 const processDummy = (
    ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
@@ -724,16 +704,13 @@ const processDummy = (
    getSignatures: (tx: Transaction) => Promise<Ed25519KeyHash[]>) =>
    async (result: BuilderResult) => {
    const tx = buildResult(costmdls)(result)
-   const expectedSignatures = await getSignatures(tx)
-   return completeDummy(ctx, tx, expectedSignatures)
+   const signedDummyTx = await signTxUsing(dummySignTx(await getSignatures(tx)), tx)
+   return evaluateTx(ctx, signedDummyTx)
 }
 
-const processReal = (
-   api: WalletCIP30ApiInstance,
-   costmdls: Costmdls) =>
-   async (result: BuilderResult) => {
+const processReal = (costmdls: Costmdls) => (result: BuilderResult) => async (signer: TxSigner) => {
    const tx = buildResult(costmdls)(result)
-   return signTxCIP30(api, tx)
+   return signTxUsing(signer, tx)
 }
 
 const processResult = <T>(f: (result: BuilderResult) => T | null | Promise<T | null>) =>
@@ -744,9 +721,9 @@ async (result: BuilderResult | Error | null) => {
 
 const simpleTxIteration = (
    ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
-   api: WalletCIP30ApiInstance,
+   // api: WalletCIP30ApiInstance,
    strategy: SimpleTxStrategy,
-   constraints: CSLPipeTxConstraints,
+   constraints: TxConstraints,
    dummyFee: BigNum,
    costmdls: Costmdls,
    pagination: () => () => Promise<TransactionUnspentOutput | null>) =>
@@ -760,14 +737,14 @@ const simpleTxIteration = (
 
    const realBuilder = await strategy.simple(cost, constraintsWithFee(constraints, fee), input)
    if (!isValidResult(realBuilder)) return realBuilder
-   return processReal(api, costmdls)(realBuilder)
+   return processReal(costmdls)(realBuilder)
 }
 
 const trySimpleTxStrategy = async (
    ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
-   api: WalletCIP30ApiInstance,
+   // api: WalletCIP30ApiInstance,
    strategy: SimpleTxStrategy,
-   constraints: CSLPipeTxConstraints,
+   constraints: TxConstraints,
    dummyFee: BigNum,
    costmdls: Costmdls,
    pagination: () => () => Promise<TransactionUnspentOutput | null>) => {
@@ -776,11 +753,11 @@ const trySimpleTxStrategy = async (
    //    getBatch: getUTxOPage(api, 50),
    //    func: simpleTxIteration(ctx, strategy, constraints, dummyFee, costmdls, pagination),
    // }))
-   let result: Transaction | Error | null = null
+   let result: UnsignedTransaction | Error | null = null
    const iterator = pagination()
    let next : TransactionUnspentOutput | null = null
    while (!isValidResult(result) && (next = await iterator())) {
-      result = await simpleTxIteration(ctx, api, strategy, constraints, dummyFee, costmdls, pagination)(next)
+      result = await simpleTxIteration(ctx, /* api,*/ strategy, constraints, dummyFee, costmdls, pagination)(next)
    }
    return result
 }
@@ -791,9 +768,9 @@ const trySimpleTxStrategy = async (
 // TODO: implement: When the check of built tx fails - the last step of the build is removed and other inputs are considered
 const tryComplexTxStrategy = async (
    ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams},
-   api: WalletCIP30ApiInstance,
+   // api: WalletCIP30ApiInstance,
    strategy: ComplexTxStrategy,
-   constraints: CSLPipeTxConstraints,
+   constraints: TxConstraints,
    dummyFee: BigNum,
    costmdls: Costmdls,
    pagination: () => () => Promise<TransactionUnspentOutput | null>) => {
@@ -812,37 +789,46 @@ const tryComplexTxStrategy = async (
       evaluated.cost,
       constraintsWithFee(constraints, evaluated.fee),
       pickRecursiveIgnore(pagination, utxoKey)
-   ).then(processResult(processReal(api, costmdls)))
+   ).then(processResult(processReal(costmdls)))
    console.log('tryComplexTxStrategy real done')
    return real
 }
 
 const minExpectedAda = 2 // Convenient, not too small amount
 
-const getUTxOPage = (api: WalletCIP30ApiInstance, limit: number) => (param: {page: number}) => api
-   // TODO: give the option to specify minimum value for UTxOs:
-   // .getUtxos(toHexed(LCSL.Value.new(ada(minExpectedAda)), v => v.to_bytes()), {...param, limit})
-   .getUtxos(undefined, {...param, limit})
-   .then(mapFromHexed(LCSL.TransactionUnspentOutput))
-   // .then(us => ((us ?? []).forEach(u => console.log('getUTxOPage', u.to_json())), us))
+const jsonToCostModel = (numbers: number[]) => {
+   const mdl = LCSL.CostModel.new()
+   numbers.forEach((num, i) => mdl.set(i, LCSL.Int.new_i32(num)))
+   return mdl
+}
+
+const fetchCostmdls = (ctx: {protocolParams: ProtocolParams}) => {
+   const costmdls = LCSL.Costmdls.new()
+   costmdls.insert(LCSL.Language.new_plutus_v2(), jsonToCostModel(ctx.protocolParams.costModel.PlutusV2))
+   // return LCSL.TxBuilderConstants.plutus_vasil_cost_models()
+   return costmdls
+}
 
 export const runStrategies = async (
    ctx: {ogmiosEndpoint: string, blockfrostApi: BlockFrostAPI, protocolParams: ProtocolParams, ttlSeconds: number},
-   api: WalletCIP30ApiInstance,
-   constraints: CSLPipeTxConstraints,
+   // api: WalletCIP30ApiInstance,
+   constraints: TxConstraints,
    dummyFee: BigNum,
-   strategies: (SimpleTxStrategy | ComplexTxStrategy | Error)[]) => {
+   strategies: (SimpleTxStrategy | ComplexTxStrategy | Error)[],
+   getUTxOPage: (param: {pageSize: number, page: number}) => Promise<TransactionUnspentOutput[]>,
+   signer: TxSigner,
+   submitter: (tx: Hex) => Promise<string>) => {
    console.log('in runStrategies', strategies)
 
-   let result: Transaction | Error | null = null
+   let result: UnsignedTransaction | Error | null = null
    const costmdls = await fetchCostmdls(ctx)
    const pageSize = 50
-   const pagination = paginatedIterator(pageSize, createPaginator(pageSize, getUTxOPage(api, pageSize)))
+   const pagination = paginatedIterator(pageSize, createPaginator(pageSize, p => getUTxOPage({page: p.page, pageSize}))) // getUTxOPage(api, pageSize)))
    for (const strategy of strategies) {
       if ('simple' in strategy) {
-         result = await trySimpleTxStrategy(ctx, api, strategy, constraints, dummyFee, costmdls, pagination)
+         result = await trySimpleTxStrategy(ctx, /* api,*/ strategy, constraints, dummyFee, costmdls, pagination)
       } else if ('complex' in strategy) {
-         result = await tryComplexTxStrategy(ctx, api, strategy, constraints, dummyFee, costmdls, pagination)
+         result = await tryComplexTxStrategy(ctx, /* api,*/ strategy, constraints, dummyFee, costmdls, pagination)
       } else {
          result = strategy
       }
@@ -851,12 +837,12 @@ export const runStrategies = async (
 
    if (!result) throw new Error('Couldn\'t find UTxO suitable for transaction!')
    if (result instanceof Error) throw result
-   // const signed = await signTxCIP30(api, result)
-   console.log('FINAL tx', result.to_json())
-   const doSubmit = (tx: Transaction) => api.submitTx(toHexed(tx))
-   let submit = doSubmit(result);
+   const signed = await result(signer)
+   console.log('FINAL tx', signed.to_json())
+   const doSubmit = (tx: Transaction) => submitter(toHexed(tx)) // api.submitTx(toHexed(tx))
+   let submit = doSubmit(signed);
 
-   (result => {
+   (signed => {
       // TODO: temporary workaround until https://github.com/Emurgo/cardano-serialization-lib/issues/572 is fixed
       submit = submit.catch((e: Error) => {
          console.log('Caugh on submit:', e)
@@ -872,13 +858,13 @@ export const runStrategies = async (
          if(!validHash) {
             throw e
          }
-         const newBody = result.body()
+         const newBody = signed.body()
          newBody.set_script_data_hash(LCSL.ScriptDataHash.from_hex(validHash))
-         return signTxCIP30(api, LCSL.Transaction.new(newBody, result.witness_set(), result.auxiliary_data()))
+         return signTxUsing(signer, LCSL.Transaction.new(newBody, signed.witness_set(), signed.auxiliary_data()))
       }).then(next => typeof next == 'string' ? next :
-         api.submitTx(toHexed(next))
+         doSubmit(next) // api.submitTx(toHexed(next))
       )
-   })(result)
+   })(signed)
 
    { // Resubmitting the same transaction multiple times
       // const cooldownSeconds = 20
@@ -913,28 +899,6 @@ export const runStrategies = async (
    })
 }
 
-const mkdDummyWitness = (hash: TransactionHash) => {
-   // const dummyKey = LCSL.PrivateKey.generate_ed25519()
-   const dummyKey = LCSL.PrivateKey.from_hex(randomStr(64)('0123456789abcdef'))
-   return LCSL.make_vkey_witness(hash, dummyKey)
-}
-
-export const dummySignTx = async (tx: Transaction, expectedSignatures: Ed25519KeyHash[]) => {
-   const hash = LCSL.hash_transaction(tx.body())
-   const witnessSet = tx.witness_set()
-   const vkeys = witnessSet.vkeys() ?? LCSL.Vkeywitnesses.new()
-   for (let i = 0; i < expectedSignatures.length; ++i) {
-      vkeys.add(mkdDummyWitness(hash))
-   }
-   witnessSet.set_vkeys(vkeys)
-
-   return LCSL.Transaction.new(
-      tx.body(),
-      witnessSet,
-      tx.auxiliary_data()
-   )
-}
-
 // Find UTxO from iterator matching target TransactionInput
 // TODO: refactor using generic iteratorLookup
 const requireInputUTxO = (pagination: () => () => Promise<TransactionUnspentOutput | null>) => async (target: TransactionInput) => {
@@ -962,18 +926,11 @@ const getExpectedWalletSignatures = (pagination: () => () => Promise<Transaction
    )
 }
 
-/**
- * Sign with wallet
- * @param wallet 
- * @param tx 
- * @returns 
- */
-export async function signTxCIP30(wallet: WalletCIP30ApiInstance, tx: Transaction) {
+async function signTxUsing(signer: TxSigner, tx: Transaction) {
    const witnessSet = tx.witness_set()
-   const txVkeyWitnessSet = fromHexed(LCSL.TransactionWitnessSet)
-      (await wallet.signTx(toHexed(tx), true)
-      .catch(rejectWith))
-   const vkeys = txVkeyWitnessSet.vkeys()
+   // const txVkeyWitnessSet = await signer(tx)
+   // const vkeys = txVkeyWitnessSet.vkeys()
+   const vkeys = await signer(tx)
    if (!vkeys) {
       throw new Error('Failed to sign transaction')
    }
@@ -986,6 +943,32 @@ export async function signTxCIP30(wallet: WalletCIP30ApiInstance, tx: Transactio
    return signedTx
 }
 
+const mkdDummyWitness = (hash: TransactionHash) => {
+   // const dummyKey = LCSL.PrivateKey.generate_ed25519()
+   const dummyKey = LCSL.PrivateKey.from_hex(randomStr(64)('0123456789abcdef'))
+   return LCSL.make_vkey_witness(hash, dummyKey)
+}
+
+export const dummySignTx = (expectedSignatures: Ed25519KeyHash[]) => async (tx: Transaction) => {
+   const hash = LCSL.hash_transaction(tx.body())
+   // const witnessSet = tx.witness_set()
+   // const vkeys = witnessSet.vkeys() ?? LCSL.Vkeywitnesses.new()
+   const vkeys = LCSL.Vkeywitnesses.new()
+   for (let i = 0; i < expectedSignatures.length; ++i) {
+      vkeys.add(mkdDummyWitness(hash))
+   }
+   return vkeys
+}
+
+/**
+ * Sign with wallet
+ * @param wallet 
+ * @param tx 
+ * @returns 
+ */
+export const signTxCIP30 = (wallet: WalletCIP30ApiInstance) => (tx: Transaction) =>
+   wallet.signTx(toHexed(tx), true).then(fromHexed(LCSL.TransactionWitnessSet), rejectWith).then(s => s.vkeys())
+
 /**
  * Sign with wallet, only keep expected signatures
  * @param wallet 
@@ -993,28 +976,37 @@ export async function signTxCIP30(wallet: WalletCIP30ApiInstance, tx: Transactio
  * @param expected 
  * @returns 
  */
-export async function signTxCIP30Expected(wallet: WalletCIP30ApiInstance, tx: Transaction, expected: Ed25519KeyHash[]) {
-   const witnessSet = tx.witness_set()
-   const txVkeyWitnessSet = fromHexed(LCSL.TransactionWitnessSet)
-      (await wallet.signTx(toHexed(tx), true)
-      .catch(rejectWith))
-   const vkeys = txVkeyWitnessSet.vkeys()
+export const signTxCIP30Expected = (wallet: WalletCIP30ApiInstance, expected: Ed25519KeyHash[]) => async (tx: Transaction) => {
+   const vkeys = await signTxCIP30(wallet)(tx)
    if (!vkeys) {
-      throw new Error('Failed to sign transaction')
+      return undefined
    }
 
    const expectedSet = new Set(expected.map(h => h.to_hex()))
    const isExpected = (key: Vkeywitness) => expectedSet.has(key.vkey().public_key().hash().to_hex())
-   const expectedVkeys = cslFilter(LCSL.Vkeywitnesses.new(), isExpected, vkeys)
-
-   witnessSet.set_vkeys(expectedVkeys)
-   const signedTx = LCSL.Transaction.new(
-      tx.body(), // txBody
-      witnessSet,
-      tx.auxiliary_data()
-   )
-   return signedTx
+   return cslFilter(LCSL.Vkeywitnesses.new(), isExpected, vkeys)
 }
+
+/**
+ * Sign transaction with every passed private key
+ * @param pkey 
+ * @returns 
+ */
+export const signTxEverySecret = (pkeys: PrivateKey[]) => (tx: Transaction) =>
+   signTxBodyEverySecret(pkeys)(tx.body())
+
+/**
+ * Sign transaction body with every passed private key
+ * @param pkey 
+ * @returns 
+ */
+export const signTxBodyEverySecret = (pkeys: PrivateKey[]) => (txBody: TransactionBody) => {
+   const txHash = LCSL.hash_transaction(txBody)
+   const vkey = pkeys.map(pkey => LCSL.make_vkey_witness(txHash, pkey))
+   return vkey
+}
+
+export const submitTxCIP30 = (api: WalletCIP30ApiInstance) => (tx: Hex) => api.submitTx(unsafeHexed(tx))
 
 export const cslEvalTxOgmios = (ctx: {ogmiosEndpoint: string}) => async (tx: Transaction) => {
    console.log('in cslEvalTxOgmios', toHex(tx.to_bytes()))
@@ -1035,22 +1027,6 @@ export const cslEvalTxBlockfrost = (ctx: {blockfrostApi: BlockFrostAPI}) => asyn
 }
 
 // ========= =========
-
-/**
- * Sign transaction with every passed private key
- * @param pkey 
- * @returns 
- */
-export const signTxEverySecret = (pkeys: PrivateKey[], txBody: TransactionBody) => {
-   const txHash = LCSL.hash_transaction(txBody)
-   const vkey = pkeys.map(pkey => LCSL.make_vkey_witness(txHash, pkey))
-   return vkey
-   // const vkeyWitnesses = LCSL.Vkeywitnesses.new()
-   // vkeyWitnesses.add(vkey)
-   // const txWitnessSet = LCSL.TransactionWitnessSet.new()
-   // txWitnessSet.set_vkeys(vkeyWitnesses)
-   // return txWitnessSet
-}
 
 // const signTxWithSecret = (pkey: PrivateKey) => (transaction: Transaction) => {
 //    transaction.
