@@ -7,6 +7,8 @@ import { singleton } from "ts-practical-fp";
 import type { Hex } from "ts-binary-newtypes";
 import type { TokenClass } from "src/typhon/api";
 import { WalletCandidate } from "src/types/wallet";
+import { TransactionUnspentOutput } from "@emurgo/cardano-serialization-lib-browser";
+import { takeLeftWhile } from "fp-ts/lib/Array.js";
 
 export const extractCip30Api = ([key, candidate]: [string, WalletCandidate]) => {
    if ('apiVersion' in candidate) {
@@ -27,13 +29,18 @@ export const fetchRecipient = async (api: WalletCIP30ApiInstance) => {
 
 export const fetchCollateral = async (api: WalletCIP30ApiInstance, lovelace: string | number) => {
    const amount = typeof lovelace == 'string' ? lovelace : lovelace.toFixed()
-   return api.getCollateral({amount})
-      .then(us => {
-         if (!us) return null
-         return mapFromHexed(LCSL.TransactionUnspentOutput)(us)
-            .sort((a, b) => a.output().amount().coin().compare(b.output().amount().coin()))
-            .at(0) ?? null
-      })
+   const us = await api.getCollateral({amount})
+   if (!us) return []
+   const sorted = mapFromHexed(LCSL.TransactionUnspentOutput)(us)
+      .sort((a, b) => a.output().amount().coin().compare(b.output().amount().coin()))
+   let acc = LCSL.BigNum.from_str(lovelace.toString())
+   const pred = (c: TransactionUnspentOutput) => {
+      if (acc.is_zero()) return false
+      acc = acc.clamped_sub(c.output().amount().coin())
+      return true
+   }
+   const minimal = takeLeftWhile(pred)(sorted)
+   return acc.is_zero() ? minimal : [] // Return empty array when total collateral not enough to cover requested amount
 }
 
 export const fetchAllWalletUTxOs_ = 
