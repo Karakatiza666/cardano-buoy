@@ -19,7 +19,7 @@ import { createPaginator, paginatedIterator, paginatedLookupMaybeNonNull } from 
 import { callNonNull, nonNull } from 'ts-practical-fp'
 import type { EvaluationCost } from 'src/types/evaluation'
 import { cslExUnits, cslPlutusScript, cslPlutusV2, cslRedeemer, requireExtDatum, requireExtDatumSource, tokenTyphonToCSL, txOutRefBytes, valueTyphonToCSL, type CompiledPolicy, type CompiledScript, type TransactionUnspentOutputExt } from 'src/csl/common'
-import type { NetworkId } from '@stricahq/typhonjs/dist/types.js'
+import type { NetworkId } from 'src/types/network'
 import type { Output, Token, TyphonValue } from 'src/typhon/api'
 import { cslScriptEnterpriseAddr, shelleyPaymentCredType } from 'src/csl/address'
 import { pickRecursiveIgnore, type PickRecursiveIgnore, type PickRecursiveIgnore_ } from 'ts-practical-fp'

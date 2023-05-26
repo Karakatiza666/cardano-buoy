@@ -1,5 +1,6 @@
 import type { Address, TransactionUnspentOutput, Value } from "@emurgo/cardano-serialization-lib-browser";
-import { NetworkId, type CardanoAddress, type ShelleyAddress } from "@stricahq/typhonjs/dist/types.js";
+import { NetworkId } from "src/types/network";
+import type { CardanoAddress, ShelleyAddress } from "@stricahq/typhonjs/dist/types.js";
 import { getAddressFromBech32, getAddressFromHex } from "@stricahq/typhonjs/dist/utils/utils.js";
 import BigNumber from "bignumber.js";
 import { cslAssetsTyphonValue, cslValueAssets, fromBigNum } from "src/csl/value";

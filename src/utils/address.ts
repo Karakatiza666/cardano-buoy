@@ -1,4 +1,4 @@
-import { NetworkId } from "@stricahq/typhonjs/dist/types.js"
+import { NetworkId } from "src/types/network"
 
 export const networkAddressPrefix = (network: NetworkId) => {
    switch(network) {

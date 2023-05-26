@@ -1,5 +1,5 @@
 import type { Address, TransactionOutput, TransactionUnspentOutput } from "@emurgo/cardano-serialization-lib-browser";
-import type { NetworkId } from "@stricahq/typhonjs/dist/types.js";
+import type { NetworkId } from "src/types/network";
 import { comp } from "ts-practical-fp";
 import { makeHex, type Hex } from "ts-binary-newtypes"
 import { addressCSLtoTyphon } from "src/typhon/common";

@@ -1,4 +1,5 @@
 import { components } from "@blockfrost/openapi"
+export { NetworkId } from '@stricahq/typhonjs/dist/types.js'
 
 export type ProtocolParams = {
    a0: number,
