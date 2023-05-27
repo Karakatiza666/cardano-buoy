@@ -2,17 +2,21 @@ import { createStateQueryClient } from "@cardano-ogmios/client"
 import { makeOgmiosContext, ogmiosFetchDatum } from "src/utils/ogmios"
 import { cslPlutusSourceRef, DetailedPlutusDataJson, gqlLanguage, PlutusLangVer, TransactionUnspentOutputExt, UTxOExtraCSL, UTxODatumInfoPlain, UtxoGQLToCSLParam, valueTyphonToCSL } from "src/csl/common"
 import type { Hex } from 'ts-binary-newtypes'
-import { nonNull } from "ts-practical-fp"
+import { limitOffsetToPageCount, nonNull, paginatedLookupAll } from "ts-practical-fp"
 import type { BlockFrostAPI } from '@blockfrost/blockfrost-js'
-import { PlutusData, TransactionUnspentOutput } from "@emurgo/cardano-serialization-lib-browser"
+import { Address, PlutusData, TransactionUnspentOutput } from "@emurgo/cardano-serialization-lib-browser"
 import { map } from "fp-ts/lib/Array.js"
 import BigNumber from "bignumber.js"
 import { components } from "@blockfrost/openapi"
 import { GQLTransactionOutput } from "src/graphql/types"
-import { valueBlockfrostToCSL } from "./value"
-import * as cbors from '@stricahq/cbors'
+import { toBigNum, valueBlockfrostToCSL } from "./value"
 import { makeHex } from 'ts-binary-newtypes'
 import { unsafeFromHexed } from 'ts-binary-newtypes'
+import { TokenClass } from "src/typhon/api"
+import { cslScriptEnterpriseAddr } from "./address"
+import { NetworkId } from "@stricahq/typhonjs/dist/types"
+import { assetClassUnit } from "src/utils/token"
+import { networkAddressPrefix } from "src/utils/address"
 
 export type GQLUTxOWithDatum = Omit<GQLTransactionOutput, 'datum'> & UTxODatumInfoPlain
 
@@ -105,8 +109,11 @@ const batchFetchGQLDatum = (ctx: {ogmiosEndpoint: string}) => async (utxos: GQLU
    }) )
 }
 
+type BlockFrostCtx = {blockfrostApi: BlockFrostAPI}
+type OgmiosCtx = {ogmiosEndpoint: string}
+
 // For UTxOs where only datum hash is known - fetch datum value
-const batchFetchGQLDatumHashValue = (ctx: {blockfrostApi: BlockFrostAPI}) => async (utxos: GQLUTxOWithDatum[]): Promise<GQLUTxOWithDatum[]> => {
+const batchFetchGQLDatumHashValue = (ctx: BlockFrostCtx) => async (utxos: GQLUTxOWithDatum[]): Promise<GQLUTxOWithDatum[]> => {
    const datums = await Promise.all(utxos
       .map((u) => u.datum && 'hash' in u.datum ? u.datum.hash : null)
       .filter(nonNull)
@@ -134,10 +141,7 @@ const batchFetchGQLDatumHashValue = (ctx: {blockfrostApi: BlockFrostAPI}) => asy
    }) )
 }
 
-export const batchUTxOGQLtoCSL = (ctx: {
-   ogmiosEndpoint: string
-   blockfrostApi: BlockFrostAPI
-}, param?: UtxoGQLToCSLParam) => <T extends TransactionUnspentOutput | TransactionUnspentOutputExt>(utxos: GQLUTxOWithDatum[]) =>
+export const batchUTxOGQLtoCSL = (ctx: BlockFrostCtx & OgmiosCtx, param?: UtxoGQLToCSLParam) => <T extends TransactionUnspentOutput | TransactionUnspentOutputExt>(utxos: GQLUTxOWithDatum[]) =>
    Promise.resolve(utxos)
    .then(us => (console.log('cslFetchInputsImpl ready', us), us))
    .then(utxos => param && utxos.length > 0 // Without utxos.length > 0 ogmiosFetchDatum() hangs
@@ -149,7 +153,7 @@ export const batchUTxOGQLtoCSL = (ctx: {
    .then(us => (console.log('cslFetchInputsImpl snd done', us), us))
    .then(map(utxoGQLToCSL(param))).then(utxo => utxo as T[])
 
-// ========================
+// ====================================================================
 
 const utxoBlockfrostToCSL = (expectedScriptLang?: PlutusLangVer) => (
    _utxo: components['schemas']['address_utxo_content'][number]
@@ -198,7 +202,7 @@ const cslCborToDatumJSON = (cbor: string) =>
       unsafeFromHexed(LCSL.PlutusData)(cbor).to_json(LCSL.PlutusDatumSchema.DetailedSchema)
    ) as DetailedPlutusDataJson
 
-const batchFetchBlockfrostDatum = (ctx: {blockfrostApi: BlockFrostAPI}) => (utxos: components['schemas']['address_utxo_content']) =>
+const batchFetchBlockfrostDatum = (ctx: BlockFrostCtx) => (utxos: components['schemas']['address_utxo_content']) =>
    Promise.all(utxos.map(async u =>
       (data_json => ({...u, data_json}))
       (
@@ -207,7 +211,72 @@ const batchFetchBlockfrostDatum = (ctx: {blockfrostApi: BlockFrostAPI}) => (utxo
        :                  null)
    ))
 
-export const batchUTxOBlockfrostToCSL = (ctx: {blockfrostApi: BlockFrostAPI}, expectedScriptLang?: PlutusLangVer) => (utxos: components['schemas']['address_utxo_content']) =>
+export const batchUTxOBlockfrostToCSL = (ctx: BlockFrostCtx, expectedScriptLang?: PlutusLangVer) => (utxos: components['schemas']['address_utxo_content']) =>
    Promise.resolve(utxos)
    .then(batchFetchBlockfrostDatum(ctx))
    .then(map(utxoBlockfrostToCSL(expectedScriptLang)))
+
+// ================================================
+
+const cslFetchInputsImpl = (param?: UtxoGQLToCSLParam) => async <T extends TransactionUnspentOutput | TransactionUnspentOutputExt>
+   (ctx: BlockFrostCtx & {network: NetworkId}, ownerAddress: Address, limit = 30, offset = 0,
+   assets: TokenClass[] = []) =>
+   // runGraphql(gqlAddressUTxOs, ctx.graphqlApi)(
+   //    ownerAddress.to_bech32(networkAddressPrefix(ctx.network)), !!param,
+   //    limit, offset,
+   //    asset
+   // )
+   // .then(batchUTxOGQLtoCSL(ctx, param))
+   (p => assets?.length
+      ? Promise.all(
+         assets.map(asset =>
+            ctx.blockfrostApi.addressesUtxosAsset(p.address, assetClassUnit(asset), p)
+         )
+      )
+      : Promise.all([ctx.blockfrostApi.addressesUtxos(p.address, p)]))
+   ({
+      address: ownerAddress.to_bech32(networkAddressPrefix(ctx.network)),
+      ...limitOffsetToPageCount(limit, offset),
+      order: 'asc' as const
+   })
+   .then(inputs => inputs.flat())
+   .then(batchUTxOBlockfrostToCSL(ctx, 'plutusV2'))
+
+
+export const cslFetchInputsExt = (param: UtxoGQLToCSLParam) => cslFetchInputsImpl(param)<TransactionUnspentOutputExt>
+export const cslFetchInputs = cslFetchInputsImpl()<TransactionUnspentOutput>
+
+const cslFetchAllInputsImpl = (param?: UtxoGQLToCSLParam) =>
+   <T extends TransactionUnspentOutput | TransactionUnspentOutputExt>
+   (ctx: BlockFrostCtx & {network: NetworkId}, ownerAddress: Address, assets: TokenClass[] = []) =>
+   paginatedLookupAll({
+      pageSize: 50, startPage: 0,
+      getBatch: ({page}) => cslFetchInputsImpl(param)(ctx, ownerAddress, 50, page * 50, assets),
+      pred: () => true
+   }).then(utxo => utxo as T[])
+
+export const cslFetchAllInputsExt = (param: UtxoGQLToCSLParam) => cslFetchAllInputsImpl(param)<TransactionUnspentOutputExt>
+export const cslFetchAllInputs = cslFetchAllInputsImpl()<TransactionUnspentOutput>
+
+export const fetchReferenceScript = async (ctx: BlockFrostCtx & {network: NetworkId}, holder: {hash: Hex}, witness: TokenClass) => {
+   const [utxo] = await cslFetchInputsExt({inlineDatum: false})(ctx, cslScriptEnterpriseAddr(ctx, holder.hash), 1, 0, [witness])
+   if (!utxo) return null
+   if (!utxo.script) throw new Error('Failed to retreive inline script reference')
+   return utxo.script.ref
+}
+
+export const fetchReferenceScriptUTxO = async (ctx: BlockFrostCtx & {network: NetworkId}, holder: {hash: Hex}, witness: TokenClass) => {
+   const [utxo] = await cslFetchInputsExt({inlineDatum: false})(ctx, cslScriptEnterpriseAddr(ctx, holder.hash), 1, 0, [witness])
+   if (!utxo) return null
+   if (!utxo.script) throw new Error('Failed to retreive inline script reference')
+   return utxo
+}
+
+// // Retrieve datum hash if present, and inject it in utxo; mutates utxo
+// export const cslFetchDatum = async (ctx: AppContext, txout: TransactionOutput) => {
+//    const datum = await cslRetrieveDatum(
+//       (hash: string) => ctx.blockfrostApi.scriptsDatum(hash),
+//       j => j,
+//       txout)
+//    return { txout, datum }
+// }

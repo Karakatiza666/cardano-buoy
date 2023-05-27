@@ -36,6 +36,13 @@ import { components } from '@blockfrost/openapi'
 import { BlockFrostAPI } from '@blockfrost/blockfrost-js'
 import { EvaluationResult } from '@cardano-ogmios/client/dist/TxSubmission/index.js'
 
+// Returns ttl slot value
+export const cslCalcTTL = ({blockfrostApi}: {blockfrostApi: BlockFrostAPI}, ttlSeconds: number) =>
+   // runGraphql(gqlCurrentSlot, graphqlApi)()
+   blockfrostApi.blocksLatest()
+      .then(block => block.slot ?? (() => { throw new Error('Failed to fetch latest slot from blockfrost')})() )
+      .then(slot => toBigNum(slot + ttlSeconds))
+
 export function makeTxBuilderCfg({protocolParams}: { protocolParams: ProtocolParams | components['schemas']['epoch_param_content']}) {
    if ('maxTxSize' in protocolParams) {
       return makeTxBuilderCfgGraphql({protocolParams})
