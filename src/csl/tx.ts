@@ -851,7 +851,7 @@ export const runStrategies = async (
 
    (signed => {
       // TODO: temporary workaround until https://github.com/Emurgo/cardano-serialization-lib/issues/572 is fixed
-      submit = submit.catch((e: Error) => {
+      submit = submit.catch(async (e: Error) => {
          console.log('Caugh on submit:', e)
          const tests = [
             /PPViewHashesDontMatch (?:(?:SNothing)|(?:\(SJust.+\))) \(SJust \(SafeHash \\?"([a-f0-9]{64})/,
@@ -863,7 +863,13 @@ export const runStrategies = async (
             if (validHash) break
          }
          if(!validHash) {
-            throw e
+            throw new Error(
+               JSON.stringify({
+                  original: e.message,
+                  inputs: (await getUTxOPage({page: 1, pageSize: 50})).map(u => u.to_json()),
+                  tx: signed.to_json()
+               })
+            )
          }
          const newBody = signed.body()
          newBody.set_script_data_hash(LCSL.ScriptDataHash.from_hex(validHash))
